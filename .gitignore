@@ -1,0 +1,156 @@
+# =====================================
+# PYTHON & GENERAL BUILD ARTIFACTS
+# =====================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+*.pyo
+*.pyd
+
+# =====================================
+# JUPYTER NOTEBOOKS
+# =====================================
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# =====================================
+# VIRTUAL ENVIRONMENTS
+# =====================================
+env/
+venv/
+ENV/
+.venv/
+conda-env/
+*.conda
+.conda/
+
+# =====================================
+# IDE / OS METADATA
+# =====================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.Trash-*
+*.sublime-*
+
+# =====================================
+# DATA (EXCLUDED ENTIRELY)
+# =====================================
+data/*
+!data/.gitkeep
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/README.md
+
+# =====================================
+# RESULTS (EXCLUDED ENTIRELY)
+# =====================================
+results/*
+!results/.gitkeep
+!results/README.md
+
+# =====================================
+# LOGS (EXCLUDED ENTIRELY)
+# =====================================
+logs/*
+!logs/.gitkeep
+
+# =====================================
+# MODEL CHECKPOINTS & LARGE BINARIES
+# =====================================
+*.pth
+*.pt
+*.ckpt
+*.pb
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.pkl
+*.pickle
+
+# =====================================
+# FIGURES (SELECTIVE)
+# =====================================
+figures/*
+!figures/.gitkeep
+!figures/final/
+!figures/final/**
+
+# =====================================
+# EXPERIMENT / TRAINING ARTIFACTS
+# =====================================
+*.tmp
+*.temp
+*.cache
+wandb/
+mlruns/
+tensorboard/
+.tensorboard/
+
+# =====================================
+# BIOINFORMATICS FILE FORMATS (LARGE)
+# =====================================
+*.gct
+*.gct.gz
+*.maf
+*.bed
+*.bam
+*.sam
+*.vcf
+*.vcf.gz
+*.fastq
+*.fastq.gz
+*.fasta
+*.fa
+
+# =====================================
+# ENVIRONMENT / CREDENTIALS
+# =====================================
+.env
+.env.local
+*.key
+*.pem
+config/secrets.yaml
+credentials/
+
+# =====================================
+# TESTING & COVERAGE
+# =====================================
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# =====================================
+# DOCUMENTATION BUILD
+# =====================================
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# =====================================
+# R / MISCELLANEOUS
+# =====================================
+.Rhistory
+.Rdata
+.Rproj.user/
+
+# =====================================
+# BACKUPS & ORPHANED FILES
+# =====================================
+*.backup
+*.bak
+*.old
