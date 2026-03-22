@@ -1,9 +1,6 @@
 """
 Phase 4: Stability Selection with MAD Pre-Filtering (Component 3)
 
-Variant of phase4_stability.py that applies unsupervised MAD (Median Absolute
-Deviation) pre-filtering before stability selection to reduce dimensionality
-and improve ranking stability, especially for the smaller TCGA cohort.
 
 Motivation:
     At p=16,353, bidirectional stability selection yields near-empty consensus
@@ -36,7 +33,7 @@ References:
     - Hoerl & Kennard (1970) Technometrics — Ridge regression
 
 Usage:
-    cd ~/hpchome/oscc-biomarker-elasticdeepsurv
+    cd ~/hpchome/oscc-biomarker-grouplasso
 
     # Default: MAD top 3000 per cohort
     PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase4_stability_mad.py
@@ -125,28 +122,25 @@ RIDGE_N_ALPHAS = 100
 RIDGE_CV_FOLDS = 3
 
 # DeepSurv hyperparameters (from Phase 2)
-DEEPSURV_PARAMS = {
-    'tcga': {
-        'hidden_sizes': [224, 224],
-        'alpha': 1.85e-3,
-        'l1_ratio': 0.9,
-        'learning_rate': 8.7e-4,
-        'dropout': 0.37,
-        'batch_size': 24,
-        'activation': 'elu',
-        'batch_norm': True,
-    },
-    'orien': {
-        'hidden_sizes': [192, 64, 32],
-        'alpha': 4.37e-3,
-        'l1_ratio': 0.5,
-        'learning_rate': 8.1e-4,
-        'dropout': 0.43,
-        'batch_size': 32,
-        'activation': 'elu',
-        'batch_norm': False,
-    },
-}
+def load_phase2_deepsurv_params(phase2_dir="results/phase2_tuning"):
+    """Load best DeepSurv hyperparameters from Phase 2 tuning output."""
+    phase2_path = Path(phase2_dir)
+    tuning_dirs = sorted(phase2_path.glob("deepsurv_tuning_*"))
+    if not tuning_dirs:
+        raise FileNotFoundError(f"No deepsurv tuning results found in {phase2_path}")
+    latest = tuning_dirs[-1]
+    results_file = latest / "all_results.json"
+    if not results_file.exists():
+        raise FileNotFoundError(f"Results file not found: {results_file}")
+    with open(results_file) as f:
+        all_results = json.load(f)
+    logger.info(f"Loaded DeepSurv Phase 2 params from: {results_file}")
+    return {
+        cohort: all_results[cohort]['best_params']
+        for cohort in ['tcga', 'orien']
+    }
+
+DEEPSURV_PARAMS = load_phase2_deepsurv_params()
 
 # DeepSurv training config
 MAX_EPOCHS = 100
@@ -155,7 +149,7 @@ SCHEDULER_PATIENCE = 10
 WEIGHT_DECAY = 0.0
 
 # IG config
-IG_N_STEPS = 50
+IG_N_STEPS = 300
 
 
 # =============================================================================

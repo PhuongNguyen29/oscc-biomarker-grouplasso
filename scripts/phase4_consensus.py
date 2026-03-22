@@ -10,7 +10,7 @@ MAD-filtered results — just point --results-dir to the appropriate
 directory.
 
 Usage:
-    cd ~/hpchome/oscc-biomarker-elasticdeepsurv
+    cd ~/hpchome/oscc-biomarker-grouplasso
 
     # Original full-dimensionality results:
     python scripts/phase4_consensus.py

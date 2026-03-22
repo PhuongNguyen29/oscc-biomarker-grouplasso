@@ -10,7 +10,7 @@ original k. Since probabilities are monotonically non-decreasing with k
 number of genes (2943) without re-running subsamples.
 
 Usage:
-    cd ~/hpchome/oscc-biomarker-elasticdeepsurv
+    cd ~/hpchome/oscc-biomarker-grouplasso
     python scripts/phase4_consensus_extended_k.py
 """
 
