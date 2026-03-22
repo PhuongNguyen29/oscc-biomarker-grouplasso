@@ -81,24 +81,33 @@ IG_N_STEPS = 300
 IG_BATCH_SIZE = 32  # patients per IG batch (GPU memory management)
 
 # Model hyperparameters (must match Phase 3 training)
-# These determine model architecture for state_dict loading
+
+def load_phase2_deepsurv_params(phase2_dir="results/phase2_tuning"):
+    """Load best DeepSurv hyperparameters from Phase 2 tuning output."""
+    phase2_path = Path(phase2_dir)
+    tuning_dirs = sorted(phase2_path.glob("deepsurv_tuning_*"))
+    if not tuning_dirs:
+        raise FileNotFoundError(f"No deepsurv tuning results found in {phase2_path}")
+    latest = tuning_dirs[-1]
+    results_file = latest / "all_results.json"
+    if not results_file.exists():
+        raise FileNotFoundError(f"Results file not found: {results_file}")
+    with open(results_file) as f:
+        all_results = json.load(f)
+    logger.info(f"Loaded DeepSurv Phase 2 params from: {results_file}")
+    return {
+        cohort: all_results[cohort]['best_params']
+        for cohort in ['tcga', 'orien']
+    }
+
+_phase2_params = load_phase2_deepsurv_params()
+
+# Map direction to training cohort's params
+# tcga_to_orien: model trained on TCGA → use TCGA params
+# orien_to_tcga: model trained on ORIEN → use ORIEN params
 MODEL_PARAMS = {
-    'tcga_to_orien': {
-        'hidden_sizes': [96, 64],
-        'dropout': 0.29,
-        'activation': 'relu',
-        'batch_norm': False,
-        'l1_ratio': 0.3,
-        'alpha': 1.92e-3,
-    },
-    'orien_to_tcga': {
-        'hidden_sizes': [128, 96],
-        'dropout': 0.35,
-        'activation': 'relu',
-        'batch_norm': True,
-        'l1_ratio': 0.9,
-        'alpha': 5.60e-3,
-    },
+    'tcga_to_orien': _phase2_params['tcga'],
+    'orien_to_tcga': _phase2_params['orien'],
 }
 
 DIRECTIONS = ['tcga_to_orien', 'orien_to_tcga']

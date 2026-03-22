@@ -106,34 +106,45 @@ EARLY_STOPPING_PATIENCE = 20
 SCHEDULER_PATIENCE = 10
 WEIGHT_DECAY = 0.0
 
-# Phase 2 best hyperparameters
-DEEPSURV_PARAMS = {
-    'tcga': {
-        'hidden_sizes': [96, 64],
-        'alpha': 1.92e-03,
-        'l1_ratio': 0.3,
-        'learning_rate': 4.6e-04,
-        'dropout': 0.29,
-        'batch_size': 24,
-        'activation': 'relu',
-        'batch_norm': False,
-    },
-    'orien': {
-        'hidden_sizes': [128, 96],
-        'alpha': 5.60e-03,
-        'l1_ratio': 0.9,
-        'learning_rate': 4.6e-04,
-        'dropout': 0.35,
-        'batch_size': 64,
-        'activation': 'relu',
-        'batch_norm': True,
-    },
-}
+def load_phase2_deepsurv_params(phase2_dir="results/phase2_tuning"):
+    """Load best DeepSurv hyperparameters from Phase 2 tuning output."""
+    phase2_path = Path(phase2_dir)
+    # Find the most recent deepsurv tuning directory
+    tuning_dirs = sorted(phase2_path.glob("deepsurv_tuning_*"))
+    if not tuning_dirs:
+        raise FileNotFoundError(f"No deepsurv tuning results found in {phase2_path}")
+    latest = tuning_dirs[-1]
+    results_file = latest / "all_results.json"
+    if not results_file.exists():
+        raise FileNotFoundError(f"Results file not found: {results_file}")
+    with open(results_file) as f:
+        all_results = json.load(f)
+    logger.info(f"Loaded DeepSurv Phase 2 params from: {results_file}")
+    return {
+        cohort: all_results[cohort]['best_params']
+        for cohort in ['tcga', 'orien']
+    }
 
-COX_PARAMS = {
-    'tcga': {'l1_ratio': 0.7},
-    'orien': {'l1_ratio': 1.0},
-}
+def load_phase2_cox_params(phase2_dir="results/phase2_tuning"):
+    """Load best Cox l1_ratio from Phase 2 tuning output."""
+    phase2_path = Path(phase2_dir)
+    tuning_dirs = sorted(phase2_path.glob("cox_tuning_*"))
+    if not tuning_dirs:
+        raise FileNotFoundError(f"No cox tuning results found in {phase2_path}")
+    latest = tuning_dirs[-1]
+    results_file = latest / "all_results.json"
+    if not results_file.exists():
+        raise FileNotFoundError(f"Results file not found: {results_file}")
+    with open(results_file) as f:
+        all_results = json.load(f)
+    logger.info(f"Loaded Cox Phase 2 params from: {results_file}")
+    return {
+        cohort: {'l1_ratio': all_results[cohort]['best_l1_ratio']}
+        for cohort in ['tcga', 'orien']
+    }
+
+DEEPSURV_PARAMS = load_phase2_deepsurv_params()
+COX_PARAMS = load_phase2_cox_params()
 
 # Cox regularization path
 COX_N_ALPHAS = 100
