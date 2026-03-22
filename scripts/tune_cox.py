@@ -9,6 +9,11 @@ For each l1_ratio, CoxnetSurvivalAnalysis computes a full regularization path
 of 100 lambda values. We evaluate each lambda by 5-fold CV C-index and select
 the best (l1_ratio, lambda) combination.
 
+Note: Lambda selection within each CV fold uses the same validation fold for
+both alpha selection and performance reporting. This is standard K-fold CV,
+not nested CV. Phase 3 re-selects lambda via proper nested inner CV per
+training fold, so this tuning script's role is to identify the best l1_ratio.
+
 References:
     - Simon et al. (2011) JSS — Regularization paths for Cox regression
     - Friedman et al. (2010) JSS — Coordinate descent for GLMs
@@ -16,7 +21,7 @@ References:
     - Bergstra et al. (2011) NeurIPS — TPE algorithm (Optuna)
 
 Usage:
-    cd ~/hpchome/oscc-biomarker-elasticdeepsurv
+    cd ~/hpchome/oscc-biomarker-grouplasso
     PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/tune_cox.py
 
 Output:
@@ -24,7 +29,7 @@ Output:
         ├── cox_tuning.log
         ├── tcga_best_params.json
         ├── orien_best_params.json
-        └── all_trials.json
+        └── all_results.json
 """
 
 import sys
@@ -83,9 +88,9 @@ def create_stratified_folds(
     y_time: np.ndarray,
     n_folds: int = 5,
     seed: int = 42
-) -> StratifiedKFold:
+) -> np.ndarray:
     """
-    Create stratified folds using event status × survival time quartile bins.
+    Create stratification labels from event status × survival time quartiles.
 
     This ensures each fold has similar event rates AND survival time distributions.
 
@@ -325,14 +330,49 @@ def tune_cox_for_cohort(
         dtype=[('event', bool), ('time', float)]
     )
 
-    final_model = CoxnetSurvivalAnalysis(
-        l1_ratio=best.params['l1_ratio'],
-        n_alphas=N_ALPHAS,
-        normalize=False,
-        tol=1e-7,
-        max_iter=100000,
-    )
-    final_model.fit(X, y_structured)
+    try:
+        final_model = CoxnetSurvivalAnalysis(
+            l1_ratio=best.params['l1_ratio'],
+            n_alphas=N_ALPHAS,
+            normalize=False,
+            tol=1e-7,
+            max_iter=100000,
+        )
+        final_model.fit(X, y_structured)
+    except (ArithmeticError, Exception) as e:
+        logger.error(f"Final full-data refit failed: {e}")
+        logger.info("Saving CV results without full-data refit.")
+
+        # Save partial results (CV completed successfully, refit failed)
+        results = {
+            'cohort': cohort,
+            'best_l1_ratio': best.params['l1_ratio'],
+            'best_mean_cindex': best.value,
+            'best_std_cindex': best.user_attrs['std_cindex'],
+            'best_mean_nonzero_genes': best.user_attrs['mean_nonzero_genes'],
+            'recommended_alpha': None,
+            'actual_path_alpha': None,
+            'n_nonzero_at_best': None,
+            'refit_error': str(e),
+            'fold_results': best.user_attrs['fold_results'],
+            'all_trial_summary': [
+                {
+                    'trial': t.number,
+                    'l1_ratio': t.params['l1_ratio'],
+                    'mean_cindex': t.value,
+                    'std_cindex': t.user_attrs['std_cindex'],
+                    'mean_nonzero': t.user_attrs['mean_nonzero_genes'],
+                }
+                for t in study.trials
+            ],
+        }
+
+        out_file = results_dir / f"{cohort}_best_params.json"
+        with open(out_file, 'w') as f:
+            json.dump(results, f, indent=2)
+        logger.info(f"Partial results saved to: {out_file}")
+
+        return results
 
     # Find the alpha from CV fold results (median of per-fold best alphas)
     fold_alphas = [
@@ -475,8 +515,8 @@ if __name__ == "__main__":
         logger.info(
             f"  {cohort.upper():>5}: l1_ratio={res['best_l1_ratio']:.1f}, "
             f"C-index={res['best_mean_cindex']:.4f} ± {res['best_std_cindex']:.4f}, "
-            f"alpha={res['recommended_alpha']:.6f}, "
-            f"nonzero={res['n_nonzero_at_best']} genes"
+            f"alpha={res.get('recommended_alpha', 'N/A')}, "
+            f"nonzero={res.get('n_nonzero_at_best', 'N/A')} genes"
         )
 
     logger.info("=" * 70)
