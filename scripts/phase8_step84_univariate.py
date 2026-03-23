@@ -61,24 +61,9 @@ def load_gene_annotation(path):
 
 
 def load_geo_dataset(name):
-    """Load expression, survival, clinical for a GEO dataset."""
     expr = pd.read_csv(DATA_DIR / f"{name}_expression.csv", index_col=0)
     surv = pd.read_csv(DATA_DIR / f"{name}_survival.csv")
-    clin = pd.read_csv(DATA_DIR / f"{name}_clinical.csv")
-
-    # Ensure clinical has a sampleID column
-    # GSE42743 has explicit "sampleID" column; GSE41613 has sample IDs as unnamed first column
-    if "sampleID" not in clin.columns:
-        if clin.columns[0].startswith("Unnamed") or clin.columns[0] == "":
-            clin = pd.read_csv(DATA_DIR / f"{name}_clinical.csv", index_col=0)
-            clin["sampleID"] = clin.index
-        else:
-            # First column might be the sample IDs with no header name
-            clin["sampleID"] = clin.iloc[:, 0]
-
-    logger.info(f"{name}: {expr.shape[1]} samples, {expr.shape[0]} genes, "
-                f"{surv['event'].sum()} events")
-    return expr, surv, clin
+    return expr, surv
 
 
 # =============================================================================
