@@ -96,7 +96,11 @@ def encode_clinical_41613(clin, surv):
     age_bin has 4 categories with no exact age — use ordinal encoding.
     """
     samples = surv["sampleID"].values
+    if "sampleID" not in clin.columns:
+        clin = clin.copy()
+        clin["sampleID"] = clin.index
     clin = clin.set_index("sampleID").loc[samples].reset_index()
+
 
     features = pd.DataFrame(index=samples)
     features["gender"] = clin["gender"].values
@@ -118,6 +122,9 @@ def encode_clinical_42743(clin, surv):
     T_stage (binary), N_stage (binary).
     """
     samples = surv["sampleID"].values
+    if "sampleID" not in clin.columns:
+        clin = clin.copy()
+        clin["sampleID"] = clin.index
     clin = clin.set_index("sampleID").loc[samples].reset_index()
 
     features = pd.DataFrame(index=samples)
