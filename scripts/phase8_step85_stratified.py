@@ -203,6 +203,9 @@ def analyze_dataset(name, expr, surv, clin, consensus_genes, ensg_to_symbol, str
     logger.info(f"{'='*60}")
 
     samples = surv["sampleID"].values
+    if "sampleID" not in clin.columns:
+        clin = clin.copy()
+        clin["sampleID"] = clin.index
     clin_aligned = clin.set_index("sampleID").loc[samples].reset_index()
     strata = strata_fn(clin_aligned)
 
