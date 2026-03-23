@@ -6,7 +6,7 @@ Analyses 5.1 and 5.2 from the v4 pipeline document.
 Analysis 5.1: Cox vs. DeepSurv Comparison
     - Out-of-fold C-index from Phase 3 (3 seeds × 2 directions × 2 methods)
     - Gene overlap: Jaccard between Cox and DeepSurv consensus sets
-    - Pathway enrichment: ORA on 54 Cox consensus genes using MSigDB
+    - Pathway enrichment: ORA on 64 Cox consensus genes using MSigDB
       (Hallmark, KEGG, GO:BP, C7 Immunologic)
 
 Analysis 5.2: Proportional Hazards Assumption
@@ -23,7 +23,7 @@ References:
     - Subramanian et al. (2005) PNAS — Gene set enrichment / MSigDB
 
 Usage:
-    cd ~/hpchome/oscc-biomarker-elasticdeepsurv
+    cd ~/hpchome/oscc-biomarker-grouplasso
     PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase5a_performance_ph.py
 
 Output:
@@ -139,11 +139,11 @@ def analysis_5_1(out_dir: Path):
     logger.info(f"    Mean bidirectional Cox:     {perf['mean_bidirectional_cox']:.4f}")
     logger.info(f"    Mean bidirectional DeepSurv: {perf['mean_bidirectional_deepsurv']:.4f}")
 
-    # Note: these are full-genome C-indices (16,353 genes), not consensus-gene C-indices
+    # Note: these are full-genome C-indices (14,675 genes), not consensus-gene C-indices
     perf['note'] = (
-        "These C-indices are from Phase 3 cross-fitted evaluation on all 16,353 genes. "
+        "These C-indices are from Phase 3 cross-fitted evaluation on all 14,675 genes. "
         "They are NOT consensus-gene-specific C-indices. Post-selection C-indices on the "
-        "54 consensus genes would be biased (v4 document, Inferential Framework)."
+        "64 consensus genes would be biased (v4 document, Inferential Framework)."
     )
 
     with open(out_dir / "performance_summary.json", 'w') as f:

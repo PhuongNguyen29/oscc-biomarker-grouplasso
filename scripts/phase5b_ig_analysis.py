@@ -26,7 +26,7 @@ References:
     - Mantel (1966) Cancer Chemother Rep — Log-rank test
 
 Usage:
-    cd ~/hpchome/oscc-biomarker-elasticdeepsurv
+    cd ~/hpchome/oscc-biomarker-grouplasso
     PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase5b_ig_analysis.py
 
 Output:
