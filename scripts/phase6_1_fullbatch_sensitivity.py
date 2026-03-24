@@ -25,7 +25,7 @@ References:
     - Harrell et al. (1982) JAMA — C-index
 
 Usage:
-    cd ~/hpchome/oscc-biomarker-elasticdeepsurv
+    cd ~/hpchome/oscc-biomarker-grouplasso
     PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase6_1_fullbatch_sensitivity.py
 
     # Or via nohup:
@@ -93,7 +93,7 @@ logging.getLogger('src.data.data_loader').setLevel(logging.WARNING)
 
 SEED = 42
 N_FOLDS = 5
-TARGET_FOLDS = [0, 1, 2, 3, 4]  # fold_idx 0=fold_1, 2=fold_3, 4=fold_5
+TARGET_FOLDS = [0, 1, 2, 3, 4]  # fold_idx 0=fold_1,1=fold_2, 2=fold_3, 3=fold_4, 4=fold_5
 DATA_DIR = "data/processed"
 PHASE3_DIR = "results/phase3_cross_fitted"
 RESULTS_DIR = "results/phase6_1_fullbatch"
@@ -107,30 +107,24 @@ WEIGHT_DECAY = 0.0
 # IG config — same as Phase 3b
 IG_N_STEPS = 300
 
-# Phase 2 best hyperparameters — IDENTICAL to Phase 3
-DEEPSURV_PARAMS = {
-    'tcga': {
-        'hidden_sizes': [96, 64],
-        'alpha': 1.92e-03,
-        'l1_ratio': 0.3,
-        'learning_rate': 4.6e-04,
-        'dropout': 0.29,
-        'batch_size': 24,       # mini-batch (for reference only)
-        'activation': 'relu',
-        'batch_norm': False,
-    },
-    'orien': {
-        'hidden_sizes': [128, 96],
-        'alpha': 5.60e-03,
-        'l1_ratio': 0.9,
-        'learning_rate': 4.6e-04,
-        'dropout': 0.35,
-        'batch_size': 64,       # mini-batch (for reference only)
-        'activation': 'relu',
-        'batch_norm': True,
-    },
-}
+def load_phase2_deepsurv_params(phase2_dir="results/phase2_tuning"):
+    phase2_path = Path(phase2_dir)
+    tuning_dirs = sorted(phase2_path.glob("deepsurv_tuning_*"))
+    if not tuning_dirs:
+        raise FileNotFoundError(f"No deepsurv tuning results found in {phase2_path}")
+    latest = tuning_dirs[-1]
+    results_file = latest / "all_results.json"
+    if not results_file.exists():
+        raise FileNotFoundError(f"Results file not found: {results_file}")
+    with open(results_file) as f:
+        all_results = json.load(f)
+    logger.info(f"Loaded DeepSurv Phase 2 params from: {results_file}")
+    return {
+        cohort: all_results[cohort]['best_params']
+        for cohort in ['tcga', 'orien']
+    }
 
+DEEPSURV_PARAMS = load_phase2_deepsurv_params()
 
 # =============================================================================
 # Helper: strata (identical to Phase 3)
@@ -362,6 +356,7 @@ def compute_ig_attributions(
             baselines=baseline_expanded,
             n_steps=n_steps,
             internal_batch_size=chunk.shape[0],
+            method='gausslegendre',
         )
         all_attrs.append(attrs.cpu().detach().numpy())
 
