@@ -75,25 +75,27 @@ OUTPUT_DIR = Path("results/ig_completeness_verification")
 SEEDS = [42, 123, 456]
 N_FOLDS = 5
 
-# Model hyperparameters (must match Phase 3 for architecture reconstruction)
-DEEPSURV_PARAMS = {
-    'tcga_to_orien': {
-        'hidden_sizes': [96, 64],
-        'dropout': 0.29,
-        'activation': 'relu',
-        'batch_norm': False,
-        'l1_ratio': 0.3,
-        'alpha': 1.92e-3,
-    },
-    'orien_to_tcga': {
-        'hidden_sizes': [128, 96],
-        'dropout': 0.35,
-        'activation': 'relu',
-        'batch_norm': True,
-        'l1_ratio': 0.9,
-        'alpha': 5.60e-3,
-    },
-}
+def load_phase2_deepsurv_params(phase2_dir="results/phase2_tuning"):
+    phase2_path = Path(phase2_dir)
+    tuning_dirs = sorted(phase2_path.glob("deepsurv_tuning_*"))
+    if not tuning_dirs:
+        raise FileNotFoundError(f"No deepsurv tuning results found in {phase2_path}")
+    latest = tuning_dirs[-1]
+    results_file = latest / "all_results.json"
+    with open(results_file) as f:
+        all_results = json.load(f)
+    logger.info(f"Loaded DeepSurv Phase 2 params from: {results_file}")
+    cohort_params = {
+        cohort: all_results[cohort]['best_params']
+        for cohort in ['tcga', 'orien']
+    }
+    # Map direction → training cohort params
+    return {
+        'tcga_to_orien': cohort_params['tcga'],
+        'orien_to_tcga': cohort_params['orien'],
+    }
+
+DEEPSURV_PARAMS = load_phase2_deepsurv_params()
 
 # Acceptance criteria
 RELATIVE_ERROR_THRESHOLD = 0.05  # 5%
@@ -135,6 +137,8 @@ def load_deepsurv_model(
         n_features=n_features,
         hidden_sizes=params['hidden_sizes'],
         dropout=params['dropout'],
+        activation=params['activation'],
+        batch_norm=params['batch_norm'],
         l1_ratio=params['l1_ratio'],
         alpha=params['alpha'],
     )
