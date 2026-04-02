@@ -538,6 +538,95 @@ p_orien <- create_pca_batch_plot(
   output_file = file.path(PLOT_DIR, "pca_orien_batch_correction.png")
 )
 
+# -----------------------------------------------------------------------------
+# 5.1 ANOVA: Quantitative Batch Effect Assessment
+# -----------------------------------------------------------------------------
+# Tests whether batch variable explains significant variance in top PCs
+# before and after ComBat correction.
+# Reference: Leek et al. (2010) Nature Reviews Genetics - batch effect detection
+
+cat("\n5.1 ANOVA: Quantitative Batch Effect Assessment\n")
+cat("-" %>% rep(50) %>% paste(collapse = ""), "\n")
+
+assess_batch_anova <- function(expr_before, expr_after, batch_vector, dataset_name) {
+  
+  cat(sprintf("\n%s Batch Effect ANOVA\n", dataset_name))
+  cat("-" %>% rep(40) %>% paste(collapse = ""), "\n")
+  
+  # PCA before correction
+  pca_before <- prcomp(t(as.matrix(expr_before)), scale. = TRUE, center = TRUE)
+  # PCA after correction
+  pca_after <- prcomp(t(as.matrix(expr_after)), scale. = TRUE, center = TRUE)
+  
+  results <- data.frame(
+    Dataset = character(),
+    Stage = character(),
+    PC = character(),
+    Batch_SS = numeric(),
+    Residual_SS = numeric(),
+    R_squared = numeric(),
+    F_value = numeric(),
+    p_value = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  for (pc_idx in 1:2) {
+    pc_label <- paste0("PC", pc_idx)
+    
+    # Before correction
+    aov_before <- summary(aov(pca_before$x[, pc_idx] ~ batch_vector))
+    ss_batch_b <- aov_before[[1]]["batch_vector", "Sum Sq"]
+    ss_resid_b <- aov_before[[1]]["Residuals", "Sum Sq"]
+    r2_before <- ss_batch_b / (ss_batch_b + ss_resid_b)
+    f_before <- aov_before[[1]]["batch_vector", "F value"]
+    p_before <- aov_before[[1]]["batch_vector", "Pr(>F)"]
+    
+    # After correction
+    aov_after <- summary(aov(pca_after$x[, pc_idx] ~ batch_vector))
+    ss_batch_a <- aov_after[[1]]["batch_vector", "Sum Sq"]
+    ss_resid_a <- aov_after[[1]]["Residuals", "Sum Sq"]
+    r2_after <- ss_batch_a / (ss_batch_a + ss_resid_a)
+    f_after <- aov_after[[1]]["batch_vector", "F value"]
+    p_after <- aov_after[[1]]["batch_vector", "Pr(>F)"]
+    
+    results <- rbind(results, data.frame(
+      Dataset = dataset_name,
+      Stage = "Before",
+      PC = pc_label,
+      Batch_SS = round(ss_batch_b, 1),
+      Residual_SS = round(ss_resid_b, 1),
+      R_squared = round(r2_before, 4),
+      F_value = round(f_before, 3),
+      p_value = p_before
+    ))
+    results <- rbind(results, data.frame(
+      Dataset = dataset_name,
+      Stage = "After",
+      PC = pc_label,
+      Batch_SS = round(ss_batch_a, 1),
+      Residual_SS = round(ss_resid_a, 1),
+      R_squared = round(r2_after, 4),
+      F_value = round(f_after, 3),
+      p_value = p_after
+    ))
+    
+    cat(sprintf("  %s Before: R²=%.3f, F=%.2f, p=%.4g\n", 
+                pc_label, r2_before, f_before, p_before))
+    cat(sprintf("  %s After:  R²=%.3f, F=%.2f, p=%.4g\n", 
+                pc_label, r2_after, f_after, p_after))
+  }
+  
+  return(results)
+}
+
+anova_tcga <- assess_batch_anova(tcga_log, tcga_corrected, tcga_batch_vector, "TCGA")
+anova_orien <- assess_batch_anova(orien_log, orien_corrected, orien_batch_vector, "ORIEN")
+
+# Combine and save
+anova_results <- rbind(anova_tcga, anova_orien)
+write.csv(anova_results, file.path(PLOT_DIR, "batch_anova_results.csv"), row.names = FALSE)
+cat(sprintf("\nANOVA results saved to: %s\n", file.path(PLOT_DIR, "batch_anova_results.csv")))
+
 # =============================================================================
 # 6. SAVE OUTPUTS
 # =============================================================================
@@ -583,8 +672,8 @@ metadata <- list(
     common_genes = length(common_genes)
   ),
   batch_correction = list(
-    tcga_method = "SVA (unsupervised, intercept-only model)",
-    tcga_n_sv = tcga_sva_result$n_sv,
+    tcga_method = "ComBat (plate ID, intercept-only model)",
+    tcga_n_batches = tcga_combat_result$n_batches,
     orien_method = "ComBat (intercept-only model)",
     orien_n_batches = orien_combat_result$n_batches
   ),
