@@ -456,9 +456,26 @@ def tune_deepsurv_for_cohort(
     expression, survival = load_cohort(cohort, DATA_DIR)
 
     # Prepare matrices (samples × genes)
-    X = expression.values.T.astype(np.float32)
-    y_event = survival['event'].values.astype(np.float32)
-    y_time = survival['time'].values.astype(np.float32)
+    # Apply IQR filter
+    iqr_gene_file = Path(DATA_DIR) / "iqr_filtered" / "retained_genes.txt"
+    if not iqr_gene_file.exists():
+        raise FileNotFoundError(
+            f"IQR filtered gene list not found: {iqr_gene_file}. "
+            f"Run scripts/filter_genes_iqr.py first."
+        )
+    with open(iqr_gene_file) as f:
+        iqr_genes = [line.strip() for line in f if line.strip()]
+    
+    # Subset expression to IQR-filtered genes
+    n_before = expression.shape[0]
+    expression = expression.loc[expression.index.isin(iqr_genes)]
+    logger.info(f"IQR filter: {n_before} → {expression.shape[0]} genes")
+
+    # Prepare matrices
+    # Expression is genes × samples, need samples × genes
+    X = expression.values.T.astype(np.float64)
+    y_event = survival['event'].values.astype(float)
+    y_time = survival['time'].values.astype(float)
     gene_names = expression.index.tolist()
     n_features = X.shape[1]
 

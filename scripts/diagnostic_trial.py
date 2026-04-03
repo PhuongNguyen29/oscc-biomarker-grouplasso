@@ -69,24 +69,24 @@ from src.utils.batch_samplers import StratifiedBatchSampler
 # Mid-range hyperparameters for diagnostic (not optimized)
 CONFIGS = {
     'tcga': {
-        'hidden_sizes': [128],        # 1 layer, moderate compression
+        'hidden_sizes': [128],
         'dropout': 0.3,
         'batch_norm': True,
         'activation': 'relu',
         'batch_size': 24,
-        'alpha': 1e-2,                # Mid-range for TCGA
+        'alpha': 1e-3,                # Starting point for 4,448 genes
         'l1_ratio': 0.5,
         'learning_rate': 3e-4,
         'n_epochs': 30,
-        'early_stopping_patience': None,  # No early stopping for diagnostic
+        'early_stopping_patience': None,
     },
     'orien': {
-        'hidden_sizes': [128, 64],    # 2 layers
+        'hidden_sizes': [128, 64],
         'dropout': 0.4,
         'batch_norm': True,
         'activation': 'relu',
         'batch_size': 64,
-        'alpha': 1e-1,                # Mid-range for ORIEN
+        'alpha': 5e-3,                # Starting point for 4,448 genes
         'l1_ratio': 0.5,
         'learning_rate': 3e-4,
         'n_epochs': 30,
@@ -206,7 +206,25 @@ def run_diagnostic(cohort: str):
     # ----- Load data -----
     logger.info("Loading data...")
     dataset = create_survival_dataset(cohort, DATA_DIR)
+    # Apply IQR filter
+    iqr_gene_file = Path(DATA_DIR) / "iqr_filtered" / "retained_genes.txt"
+    if not iqr_gene_file.exists():
+        raise FileNotFoundError(
+            f"IQR filtered gene list not found: {iqr_gene_file}. "
+            f"Run scripts/filter_genes_iqr.py first."
+        )
+    with open(iqr_gene_file) as f:
+        iqr_genes = [line.strip() for line in f if line.strip()]
+    
+    # Subset to IQR-filtered genes
+    gene_mask = [g in set(iqr_genes) for g in dataset.gene_names]
+    gene_indices = [i for i, keep in enumerate(gene_mask) if keep]
+    n_before = dataset.n_features
+    dataset.X = dataset.X[:, gene_indices]
+    dataset.gene_names = [dataset.gene_names[i] for i in gene_indices]
+    dataset.n_features = len(gene_indices)
     n_features = dataset.n_features
+    logger.info(f"IQR filter: {n_before} → {n_features} genes")
     logger.info(f"Features: {n_features}, Samples: {len(dataset)}")
 
     # ----- Train/valid split -----
