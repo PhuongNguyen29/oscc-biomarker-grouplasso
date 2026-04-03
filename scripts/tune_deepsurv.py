@@ -117,7 +117,7 @@ SEARCH_SPACES = {
 }
 
 # Common search space (both cohorts)
-L1_RATIO_CHOICES = [0.3, 0.5, 0.7, 0.9]
+L1_RATIO_CHOICES = [0.3,0.4, 0.5,0.6 0.7,0.8, 0.9]
 ACTIVATION_CHOICES = ['relu', 'elu']
 LR_MIN = 1e-4
 LR_MAX = 1e-3

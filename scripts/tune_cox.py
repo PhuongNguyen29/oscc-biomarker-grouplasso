@@ -73,7 +73,7 @@ DATA_DIR = "data/processed"
 
 # l1_ratio search space (discrete grid)
 # 0.1 = mostly Ridge, 1.0 = pure Lasso
-L1_RATIO_CHOICES = [0.1, 0.3, 0.5, 0.7, 0.9, 1.0]
+L1_RATIO_CHOICES = [0.1, 0.2,0.3,0.4, 0.5,0.6, 0.7,0.8,  0.9, 1.0]
 
 # Number of lambda values in the regularization path
 N_ALPHAS = 100
