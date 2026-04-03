@@ -738,6 +738,10 @@ if __name__ == "__main__":
         description="Phase 4: Stability Selection with IQR Pre-Filtering"
     )
     parser.add_argument(
+    '--filter-dir', type=str, default='iqr_filtered',
+    help="Subdirectory under data/processed/ with retained_genes.txt (default: iqr_filtered)"
+    )
+    parser.add_argument(
         '--cohort', type=str, default='both',
         choices=['tcga', 'orien', 'both'],
         help="Which cohort to run as training cohort (default: both)"
@@ -804,8 +808,8 @@ if __name__ == "__main__":
     logger.info(f"IQR PRE-FILTERING")
     logger.info(f"{'='*70}")
 
-    iqr_gene_file = Path(DATA_DIR) / "iqr_filtered" / "retained_genes.txt"
-    iqr_metadata_file = Path(DATA_DIR) / "iqr_filtered" / "filter_metadata.json"
+    iqr_gene_file = Path(DATA_DIR) / args.filter_dir / "retained_genes.txt"
+    iqr_metadata_file = Path(DATA_DIR) / args.filter_dir / "filter_metadata.json"
 
     if not iqr_gene_file.exists():
         raise FileNotFoundError(
