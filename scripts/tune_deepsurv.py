@@ -90,9 +90,9 @@ WEIGHT_DECAY = 0.0           # Elastic net handles regularization
 WEIGHT_INIT = 'kaiming_uniform'
 
 # Cohort-specific search spaces
-# Alpha ranges calibrated from diagnostic trials:
-#   TCGA alpha=1e-4 → P/C=0.04 (too low), alpha=1e-2 → P/C=3.7 (too high)
-#   ORIEN alpha=1e-5 → P/C=0.003 (too low), alpha=1e-1 → P/C=27 (too high)
+# Alpha ranges calibrated from diagnostic trials on 4,448 IQR-filtered genes:
+#   TCGA alpha=1e-3 → P/C=0.21 (epoch 1), P/C=0.92 (epoch 30)
+#   ORIEN alpha=5e-3 → P/C=0.77 (epoch 1), P/C=1.08 (epoch 30)
 SEARCH_SPACES = {
     'tcga': {
         'n_layers': [1, 2],
@@ -101,8 +101,8 @@ SEARCH_SPACES = {
         'dropout_min': 0.2,
         'dropout_max': 0.4,
         'batch_size_choices': [16, 24],
-        'alpha_min': 5e-4,
-        'alpha_max': 5e-3,
+        'alpha_min': 2e-4,
+        'alpha_max': 1e-2,
     },
     'orien': {
         'n_layers': [2, 3],
@@ -111,8 +111,8 @@ SEARCH_SPACES = {
         'dropout_min': 0.3,
         'dropout_max': 0.5,
         'batch_size_choices': [32, 64],
-        'alpha_min': 1e-3,
-        'alpha_max': 5e-2,
+        'alpha_min': 3e-4,
+        'alpha_max': 1.5e-2,
     },
 }
 
@@ -471,11 +471,10 @@ def tune_deepsurv_for_cohort(
     expression = expression.loc[expression.index.isin(iqr_genes)]
     logger.info(f"IQR filter: {n_before} → {expression.shape[0]} genes")
 
-    # Prepare matrices
-    # Expression is genes × samples, need samples × genes
-    X = expression.values.T.astype(np.float64)
-    y_event = survival['event'].values.astype(float)
-    y_time = survival['time'].values.astype(float)
+    # Prepare matrices (samples × genes)
+    X = expression.values.T.astype(np.float32)
+    y_event = survival['event'].values.astype(np.float32)
+    y_time = survival['time'].values.astype(np.float32)
     gene_names = expression.index.tolist()
     n_features = X.shape[1]
 
