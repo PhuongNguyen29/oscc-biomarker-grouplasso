@@ -27,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-RESULTS_BASE = Path("results/phase4_stability_mad3000")
+RESULTS_BASE = Path("results/phase4_stability_iqr")
 # Extended k scan — original + new values
 K_SCAN_EXTENDED = [50, 100, 150, 200, 300, 500, 750, 1000, 1250, 1500]
 PI_THRESHOLDS = [0.70, 0.80, 0.90]

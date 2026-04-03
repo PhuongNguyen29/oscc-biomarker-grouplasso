@@ -1,56 +1,43 @@
 """
-Phase 4: Stability Selection with MAD Pre-Filtering (Component 3)
-
+Phase 4: Stability Selection with IQR Pre-Filtering (Component 3)
 
 Motivation:
-    At p=16,353, bidirectional stability selection yields near-empty consensus
+    At p=14,675, bidirectional stability selection yields near-empty consensus
     because TCGA (n=339, ~270 per subsample) produces noisy rankings when
-    p/n ≈ 60. MAD filtering reduces p to ~1,500–3,000 genes using expression
+    p/n ≈ 54. IQR filtering reduces p to ~4,448 genes using expression
     variability only (no survival outcome), preserving the decoupled design.
 
-MAD filtering rationale:
+IQR filtering rationale:
     Genes with low expression variability across samples cannot contribute
     meaningfully to survival prediction — they carry minimal discriminative
-    information. MAD is preferred over standard deviation because it is robust
-    to outliers (Hampel 1974, JASA). Per-cohort MAD selection followed by
-    intersection ensures retained genes are variable in BOTH cohorts, providing
-    an implicit cross-cohort filter.
+    information. IQR is robust to outliers and is the default variability
+    metric in the Bioconductor genefilter package. Per-cohort median IQR
+    filtering followed by intersection ensures retained genes are variable
+    in BOTH cohorts, providing an implicit cross-cohort filter.
 
-Decision rule:
-    - Compute MAD per gene in each cohort separately (unsupervised)
-    - Select top N genes by MAD in each cohort
-    - If intersection >= 1,500: use intersection
-    - If intersection < 1,500: use union with guardrail
-      (gene must have MAD > cohort median in the other cohort)
+    The IQR-filtered gene list is pre-computed by scripts/filter_genes_iqr.py
+    and loaded from data/processed/iqr_filtered/retained_genes.txt.
 
 All other Phase 4 logic (subsampling, Ridge Cox, DeepSurv+IG, selection
-probabilities, consensus, plateau rule) is identical to phase4_stability.py.
+probabilities, consensus, plateau rule) is identical to the original
+phase4_stability.py.
 
 References:
-    - Hampel (1974) JASA — Robust estimation via MAD
+    - Bourgon et al. (2010) PNAS — Independent filtering principle
+    - Bioconductor genefilter — IQR with 0.5 quantile default
     - Meinshausen & Buhlmann (2010) JRSS-B — Stability selection
     - Sundararajan et al. (2017) ICML — Integrated Gradients
     - Hoerl & Kennard (1970) Technometrics — Ridge regression
 
 Usage:
     cd ~/hpchome/oscc-biomarker-grouplasso
-
-    # Default: MAD top 3000 per cohort
-    PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase4_stability_mad.py
-
-    # Custom MAD top-N:
-    PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase4_stability_mad.py --mad-top-n 5000
+    PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase4_stability.py
 
     # Single cohort:
-    PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase4_stability_mad.py --cohort tcga
+    PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase4_stability.py --cohort tcga
 
 Output:
-    results/phase4_stability_mad3000/
-        mad_filter/
-            mad_values_tcga.csv
-            mad_values_orien.csv
-            mad_filter_metadata.json
-            retained_genes.txt
+    results/phase4_stability_iqr/
         ridge_lambda_selection.json
         subsample_rankings/  (same structure as original)
         selection_probabilities/  (same structure as original)
@@ -103,11 +90,7 @@ B_SUBSAMPLES = 50
 SUBSAMPLE_FRACTION = 0.80
 RANDOM_SEED = 42
 DATA_DIR = "data/processed"
-RESULTS_BASE_DEFAULT = "results/phase4_stability_mad{top_n}"
-
-# MAD filtering defaults
-MAD_TOP_N_DEFAULT = 3000
-MAD_INTERSECTION_THRESHOLD = 1500
+RESULTS_BASE_DEFAULT = "results/phase4_stability_iqr"
 
 # k scan values
 K_SCAN = [50, 100, 150, 200, 300, 500, 750, 1000]
@@ -153,158 +136,7 @@ IG_N_STEPS = 300
 
 
 # =============================================================================
-# MAD Pre-Filtering
-# =============================================================================
-
-def compute_mad_filter(
-    tcga_expr: pd.DataFrame,
-    orien_expr: pd.DataFrame,
-    top_n: int = MAD_TOP_N_DEFAULT,
-    intersection_threshold: int = MAD_INTERSECTION_THRESHOLD,
-    results_dir: Path = None,
-) -> Tuple[List[str], dict]:
-    """
-    Unsupervised MAD-based gene filtering.
-
-    Computes MAD per gene per cohort using expression values only (no survival).
-    Selects top-N most variable genes per cohort, then combines via
-    intersection or guardrailed union depending on overlap size.
-
-    Args:
-        tcga_expr: DataFrame, shape (n_genes, n_samples), genes as rows
-        orien_expr: DataFrame, shape (n_genes, n_samples), genes as rows
-        top_n: Number of top-MAD genes to select per cohort
-        intersection_threshold: If intersection >= this, use intersection;
-            otherwise use union with guardrail
-        results_dir: If provided, save MAD values and metadata here
-
-    Returns:
-        retained_genes: Sorted list of gene IDs passing the filter
-        metadata: Dict with filter statistics for reproducibility
-    """
-    logger.info(f"Computing MAD filter (top {top_n} per cohort)...")
-
-    # Compute MAD per gene: median absolute deviation across samples
-    # axis=1 because rows=genes, columns=samples
-    tcga_mad = (tcga_expr.sub(tcga_expr.median(axis=1), axis=0)).abs().median(axis=1)
-    orien_mad = (orien_expr.sub(orien_expr.median(axis=1), axis=0)).abs().median(axis=1)
-
-    # Sanity: gene sets should be identical at this point
-    assert set(tcga_mad.index) == set(orien_mad.index), \
-        "Gene sets differ between TCGA and ORIEN expression matrices"
-
-    all_genes = tcga_mad.index.tolist()
-    n_total = len(all_genes)
-
-    # Cohort-level medians (used for guardrail)
-    tcga_median_mad = float(tcga_mad.median())
-    orien_median_mad = float(orien_mad.median())
-
-    logger.info(f"  Total genes: {n_total}")
-    logger.info(f"  TCGA MAD: median={tcga_median_mad:.4f}, "
-                f"range=[{tcga_mad.min():.4f}, {tcga_mad.max():.4f}]")
-    logger.info(f"  ORIEN MAD: median={orien_median_mad:.4f}, "
-                f"range=[{orien_mad.min():.4f}, {orien_mad.max():.4f}]")
-
-    # Select top-N per cohort
-    tcga_top = set(tcga_mad.nlargest(top_n).index)
-    orien_top = set(orien_mad.nlargest(top_n).index)
-
-    intersection = tcga_top & orien_top
-    union = tcga_top | orien_top
-    n_intersection = len(intersection)
-    n_union = len(union)
-
-    logger.info(f"  TCGA top-{top_n}: {len(tcga_top)} genes")
-    logger.info(f"  ORIEN top-{top_n}: {len(orien_top)} genes")
-    logger.info(f"  Intersection: {n_intersection} genes")
-    logger.info(f"  Union: {n_union} genes")
-
-    # Decision rule
-    if n_intersection >= intersection_threshold:
-        retained = sorted(intersection)
-        decision = "intersection"
-        logger.info(f"  Decision: intersection >= {intersection_threshold} → "
-                    f"using intersection ({n_intersection} genes)")
-    else:
-        # Union with guardrail: gene must have MAD > cohort median in the
-        # other cohort. This prevents including genes that are variable in
-        # one cohort but near-constant in the other.
-        guardrailed = set()
-        for gene in union:
-            in_tcga_top = gene in tcga_top
-            in_orien_top = gene in orien_top
-
-            if in_tcga_top and in_orien_top:
-                # In both tops — always keep
-                guardrailed.add(gene)
-            elif in_tcga_top and not in_orien_top:
-                # In TCGA top only — keep if ORIEN MAD > ORIEN median
-                if orien_mad[gene] > orien_median_mad:
-                    guardrailed.add(gene)
-            elif in_orien_top and not in_tcga_top:
-                # In ORIEN top only — keep if TCGA MAD > TCGA median
-                if tcga_mad[gene] > tcga_median_mad:
-                    guardrailed.add(gene)
-
-        retained = sorted(guardrailed)
-        decision = "union_with_guardrail"
-        logger.info(f"  Decision: intersection < {intersection_threshold} → "
-                    f"union with guardrail ({len(retained)} genes)")
-        logger.info(f"    Guardrail removed {n_union - len(retained)} genes "
-                    f"from union")
-
-    logger.info(f"  Final retained: {len(retained)} genes")
-
-    # Metadata for reproducibility
-    metadata = {
-        'top_n_per_cohort': top_n,
-        'intersection_threshold': intersection_threshold,
-        'n_total_genes': n_total,
-        'tcga_mad_median': tcga_median_mad,
-        'orien_mad_median': orien_median_mad,
-        'tcga_mad_min': float(tcga_mad.min()),
-        'tcga_mad_max': float(tcga_mad.max()),
-        'orien_mad_min': float(orien_mad.min()),
-        'orien_mad_max': float(orien_mad.max()),
-        'n_tcga_top': len(tcga_top),
-        'n_orien_top': len(orien_top),
-        'n_intersection': n_intersection,
-        'n_union': n_union,
-        'decision': decision,
-        'n_retained': len(retained),
-        'p_n_ratio_tcga_subsample': round(len(retained) / (339 * SUBSAMPLE_FRACTION), 1),
-    }
-
-    # Save if results_dir provided
-    if results_dir is not None:
-        mad_dir = results_dir / "mad_filter"
-        mad_dir.mkdir(parents=True, exist_ok=True)
-
-        # Save MAD values per cohort (full, not just top-N)
-        tcga_mad.sort_values(ascending=False).to_csv(
-            mad_dir / "mad_values_tcga.csv", header=['MAD']
-        )
-        orien_mad.sort_values(ascending=False).to_csv(
-            mad_dir / "mad_values_orien.csv", header=['MAD']
-        )
-
-        # Save retained gene list
-        with open(mad_dir / "retained_genes.txt", 'w') as f:
-            for gene in retained:
-                f.write(gene + '\n')
-
-        # Save metadata
-        with open(mad_dir / "mad_filter_metadata.json", 'w') as f:
-            json.dump(metadata, f, indent=2)
-
-        logger.info(f"  MAD filter results saved to {mad_dir}")
-
-    return retained, metadata
-
-
-# =============================================================================
-# Helpers (unchanged from phase4_stability.py)
+# Helpers
 # =============================================================================
 
 def create_strata(y_event, y_time):
@@ -903,7 +735,7 @@ def run_stability_for_cohort(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Phase 4: Stability Selection with MAD Pre-Filtering"
+        description="Phase 4: Stability Selection with IQR Pre-Filtering"
     )
     parser.add_argument(
         '--cohort', type=str, default='both',
@@ -911,16 +743,8 @@ if __name__ == "__main__":
         help="Which cohort to run as training cohort (default: both)"
     )
     parser.add_argument(
-        '--mad-top-n', type=int, default=MAD_TOP_N_DEFAULT,
-        help=f"Top N genes by MAD per cohort (default: {MAD_TOP_N_DEFAULT})"
-    )
-    parser.add_argument(
-        '--intersection-threshold', type=int, default=MAD_INTERSECTION_THRESHOLD,
-        help=f"Minimum intersection size for pure intersection (default: {MAD_INTERSECTION_THRESHOLD})"
-    )
-    parser.add_argument(
         '--results-dir', type=str, default=None,
-        help="Override results directory (default: results/phase4_stability_mad{N})"
+        help=f"Override results directory (default: {RESULTS_BASE_DEFAULT})"
     )
     args = parser.parse_args()
 
@@ -936,24 +760,23 @@ if __name__ == "__main__":
     if args.results_dir:
         results_dir = Path(args.results_dir)
     else:
-        results_dir = Path(RESULTS_BASE_DEFAULT.format(top_n=args.mad_top_n))
+        results_dir = Path(RESULTS_BASE_DEFAULT)
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # Log to file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_handler = logging.FileHandler(results_dir / f"phase4_mad_{timestamp}.log")
+    file_handler = logging.FileHandler(results_dir / f"phase4_iqr_{timestamp}.log")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(
         logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     )
     logging.getLogger().addHandler(file_handler)
 
-    logger.info(f"Phase 4: Stability Selection with MAD Pre-Filtering")
+    logger.info(f"Phase 4: Stability Selection with IQR Pre-Filtering")
     logger.info(f"Device: {device}")
     if device == 'cuda':
         logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
     logger.info(f"Results: {results_dir}")
-    logger.info(f"MAD top-N: {args.mad_top_n}")
 
     # =========================================================================
     # Load data
@@ -974,25 +797,40 @@ if __name__ == "__main__":
     logger.info(f"Full gene set: {len(gene_names_full)} genes")
 
     # =========================================================================
-    # MAD pre-filtering (BEFORE any survival-based analysis)
+    # IQR pre-filtering (load pre-computed gene list)
     # =========================================================================
     logger.info(f"")
     logger.info(f"{'='*70}")
-    logger.info(f"MAD PRE-FILTERING")
+    logger.info(f"IQR PRE-FILTERING")
     logger.info(f"{'='*70}")
 
-    retained_genes, mad_metadata = compute_mad_filter(
-        tcga_expr, orien_expr,
-        top_n=args.mad_top_n,
-        intersection_threshold=args.intersection_threshold,
-        results_dir=results_dir,
-    )
+    iqr_gene_file = Path(DATA_DIR) / "iqr_filtered" / "retained_genes.txt"
+    iqr_metadata_file = Path(DATA_DIR) / "iqr_filtered" / "filter_metadata.json"
 
-    # Subset expression matrices to retained genes BEFORE transposing
+    if not iqr_gene_file.exists():
+        raise FileNotFoundError(
+            f"IQR filtered gene list not found: {iqr_gene_file}. "
+            f"Run scripts/filter_genes_iqr.py first."
+        )
+
+    with open(iqr_gene_file) as f:
+        retained_genes = [line.strip() for line in f if line.strip()]
+
+    iqr_metadata = {}
+    if iqr_metadata_file.exists():
+        with open(iqr_metadata_file) as f:
+            iqr_metadata = json.load(f)
+
+    logger.info(f"  IQR filter: {len(gene_names_full)} → {len(retained_genes)} genes")
+    if iqr_metadata:
+        logger.info(f"  TCGA median IQR threshold: {iqr_metadata.get('tcga_median_iqr', 'N/A')}")
+        logger.info(f"  ORIEN median IQR threshold: {iqr_metadata.get('orien_median_iqr', 'N/A')}")
+
+    # Subset expression matrices to retained genes
     tcga_expr_filtered = tcga_expr.loc[retained_genes]
     orien_expr_filtered = orien_expr.loc[retained_genes]
 
-    # Now transpose to samples × genes for modeling
+    # Transpose to samples × genes for modeling
     tcga_X = tcga_expr_filtered.values.T.astype(np.float32)
     tcga_event = tcga_surv['event'].values.astype(np.float32)
     tcga_time = tcga_surv['time'].values.astype(np.float32)
@@ -1001,8 +839,7 @@ if __name__ == "__main__":
     orien_event = orien_surv['event'].values.astype(np.float32)
     orien_time = orien_surv['time'].values.astype(np.float32)
 
-    gene_names = retained_genes  # sorted list from MAD filter
-
+    gene_names = retained_genes
     n_features = len(gene_names)
 
     logger.info(f"")
@@ -1016,11 +853,11 @@ if __name__ == "__main__":
                 f"{n_features / int(tcga_X.shape[0] * SUBSAMPLE_FRACTION):.1f}")
 
     # =========================================================================
-    # Step 1: Ridge lambda selection (on filtered gene set)
+    # Step 1: Ridge lambda selection (on IQR-filtered gene set)
     # =========================================================================
     logger.info(f"")
     logger.info(f"{'='*70}")
-    logger.info(f"STEP 1: Ridge Lambda Selection (on {n_features} MAD-filtered genes)")
+    logger.info(f"STEP 1: Ridge Lambda Selection (on {n_features} IQR-filtered genes)")
     logger.info(f"{'='*70}")
 
     tcga_lambda, tcga_ridge_ci = select_ridge_lambda(
@@ -1035,8 +872,8 @@ if __name__ == "__main__":
         'orien': {'alpha': orien_lambda, 'cv_cindex': orien_ridge_ci},
         'method': 'CoxnetSurvivalAnalysis(l1_ratio=1e-10) — near-pure L2 ridge',
         'n_genes': n_features,
-        'mad_filter': f'top-{args.mad_top_n} MAD, {mad_metadata["decision"]}',
-        'note': 'Alpha selected once per cohort via within-cohort CV on MAD-filtered genes. '
+        'filter': f'IQR above cohort-specific median, intersected ({n_features} genes)',
+        'note': 'Alpha selected once per cohort via within-cohort CV on IQR-filtered genes. '
                 'Held fixed across subsamples to isolate sampling perturbation.',
     }
     with open(results_dir / "ridge_lambda_selection.json", 'w') as f:
@@ -1187,12 +1024,11 @@ if __name__ == "__main__":
         # --- Final summary ---
         logger.info(f"")
         logger.info(f"{'='*70}")
-        logger.info(f"FINAL SUMMARY — PHASE 4 (MAD-filtered)")
+        logger.info(f"FINAL SUMMARY — PHASE 4 (IQR-filtered)")
         logger.info(f"{'='*70}")
 
-        logger.info(f"  MAD filter: top-{args.mad_top_n}/cohort, "
-                    f"{mad_metadata['decision']}, "
-                    f"{mad_metadata['n_retained']} genes retained")
+        logger.info(f"  IQR filter: {len(gene_names_full)} → {n_features} genes "
+                    f"(above-median IQR in both cohorts, intersected)")
 
         for method in methods:
             res = plateau_results[method]
@@ -1219,7 +1055,7 @@ if __name__ == "__main__":
 
         # Save overall summary
         summary = {
-            'mad_filter': mad_metadata,
+            'iqr_filter': iqr_metadata,
             'ridge_lambdas': lambda_info,
             'plateau_results': serializable,
             'gene_overlap': {
@@ -1238,8 +1074,8 @@ if __name__ == "__main__":
                 'ridge_method': 'CoxnetSurvivalAnalysis(l1_ratio=1e-10) — near-pure L2 ridge',
                 'ig_n_steps': IG_N_STEPS,
                 'ig_computed_on': 'OOB (out-of-subsample 20%)',
-                'mad_top_n': args.mad_top_n,
-                'mad_intersection_threshold': MAD_INTERSECTION_THRESHOLD,
+                'filter_method': 'IQR above cohort-specific median, intersected',
+                'filter_reference': 'Bourgon et al. (2010) PNAS; Bioconductor genefilter',
             },
         }
         with open(results_dir / "summary.json", 'w') as f:
@@ -1249,4 +1085,4 @@ if __name__ == "__main__":
         logger.info("Only one cohort run. Consensus analysis requires both cohorts.")
         logger.info("Run with --cohort both to compute consensus.")
 
-    logger.info(f"\nPhase 4 (MAD-filtered) complete.")
+    logger.info(f"\nPhase 4 (IQR-filtered) complete.")

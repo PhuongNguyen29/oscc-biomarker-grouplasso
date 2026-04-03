@@ -33,7 +33,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration (must match phase4_stability*.py)
-RESULTS_BASE_DEFAULT = "results/phase4_stability"
+RESULTS_BASE_DEFAULT = "results/phase4_stability_iqr"
 K_SCAN = [50, 100, 150, 200, 300, 500, 750, 1000]
 PI_THRESHOLDS = [0.70, 0.80, 0.90]
 PI_PRIMARY = 0.80
