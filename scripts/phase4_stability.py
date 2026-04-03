@@ -87,10 +87,10 @@ logging.getLogger('src.data.data_loader').setLevel(logging.WARNING)
 # =============================================================================
 
 B_SUBSAMPLES = 50
-SUBSAMPLE_FRACTION = 0.80
+SUBSAMPLE_FRACTION = 0.50
 RANDOM_SEED = 42
 DATA_DIR = "data/processed"
-RESULTS_BASE_DEFAULT = "results/phase4_stability_iqr"
+RESULTS_BASE_DEFAULT = "results/phase4_stability_iqr_half"
 
 # k scan values
 K_SCAN = [50, 100, 150, 200, 300, 500, 750, 1000]
