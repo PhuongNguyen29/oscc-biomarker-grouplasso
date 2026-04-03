@@ -255,6 +255,21 @@ if __name__ == "__main__":
     tcga_expr, tcga_surv = load_cohort('tcga', DATA_DIR)
     orien_expr, orien_surv = load_cohort('orien', DATA_DIR)
 
+    # Apply IQR filter
+    iqr_gene_file = Path(DATA_DIR) / "iqr_filtered" / "retained_genes.txt"
+    if not iqr_gene_file.exists():
+        raise FileNotFoundError(
+            f"IQR filtered gene list not found: {iqr_gene_file}. "
+            f"Run scripts/filter_genes_iqr.py first."
+        )
+    with open(iqr_gene_file) as f:
+        iqr_genes = [line.strip() for line in f if line.strip()]
+
+    n_before = tcga_expr.shape[0]
+    tcga_expr = tcga_expr.loc[tcga_expr.index.isin(iqr_genes)]
+    orien_expr = orien_expr.loc[orien_expr.index.isin(iqr_genes)]
+    logger.info(f"IQR filter: {n_before} → {tcga_expr.shape[0]} genes")
+
     gene_names = tcga_expr.index.tolist()
     n_features = len(gene_names)
     logger.info(f"Genes: {n_features}")
