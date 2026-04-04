@@ -131,7 +131,7 @@ expr41613 <- exprs(gse41613[[1]])
 meta41613 <- pData(gse41613[[1]])
 cat("GSE41613 expression:", nrow(expr41613), "probes ×", ncol(expr41613), "samples\n")
 
-# gse42743 <- getGEO("GSE42743", GSEMatrix = TRUE)
+gse42743 <- getGEO("GSE42743", GSEMatrix = TRUE)
 # expr42743 <- exprs(gse42743[[1]])
 meta42743 <- pData(gse42743[[1]])
 # cat("GSE42743 expression:", nrow(expr42743), "probes ×", ncol(expr42743), "samples\n")
