@@ -35,8 +35,8 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Configuration
 # =============================================================================
-SEED = 42
-N_FOLDS = 5
+SEED =  list(range(42, 142))
+N_FOLDS = 3
 DATA_DIR = Path("data/external")
 CONSENSUS_FILE = Path("results/phase4_stability_iqr/consensus/cox_consensus_pi080.txt")
 OUTPUT_DIR = Path("results/phase8_external_validation")
@@ -207,8 +207,7 @@ def cv_ridge_cox(X, y_struct, events, n_folds=N_FOLDS, alphas=None, seed=SEED):
                 pass
 
         fold_results.append(fold_cindices)
-        logger.info(f"  Fold {fold_idx+1}: {test_events} events, "
-                    f"best C-index = {np.nanmax(fold_cindices):.3f}")
+      
 
     if len(fold_results) == 0:
         return None, None, None
@@ -243,44 +242,47 @@ def rank_transform(X):
     return X_rank
 
 
-SEEDS = [42, 123, 456]
+SEEDS = list(range(42, 142)) 
 
 
 # =============================================================================
 # Main Analysis
 # =============================================================================
 def run_multi_seed_cv(X, y_struct, events, alphas=None, label=""):
-    """Run CV across multiple seeds, report mean and range.
+    """Run CV across multiple seeds, report median and percentile interval.
     
-    Follows Phase 6.4 convention: range > 0.03 indicates instability.
+    Uses 100 repeated stratified 3-fold CV for stable estimation.
     """
     seed_results = []
     for seed in SEEDS:
         c, s, a = cv_ridge_cox(X, y_struct, events, alphas=alphas, seed=seed)
         if c is not None:
             seed_results.append({"seed": seed, "cv_cindex": c, "std": s, "alpha": a})
-            logger.info(f"    Seed {seed}: CV C-index = {c:.3f} ± {s:.3f} (alpha = {a:.4e})")
 
     if len(seed_results) == 0:
         return None
 
     cindices = [r["cv_cindex"] for r in seed_results]
+    median_c = np.median(cindices)
+    ci_lower = np.percentile(cindices, 2.5)
+    ci_upper = np.percentile(cindices, 97.5)
     mean_c = np.mean(cindices)
-    range_c = np.max(cindices) - np.min(cindices)
-    stable = "STABLE" if range_c < 0.03 else "UNSTABLE"
+    sd_c = np.std(cindices)
 
-    logger.info(f"  {label} across seeds: mean = {mean_c:.3f}, "
-                f"range = {range_c:.3f} ({stable})")
+    logger.info(f"  {label} across {len(cindices)} seeds:")
+    logger.info(f"    Median = {median_c:.3f} (95% CI: {ci_lower:.3f} – {ci_upper:.3f})")
+    logger.info(f"    Mean = {mean_c:.3f} ± {sd_c:.3f}")
 
     return {
-        "cv_cindex": mean_c,
-        "std": np.mean([r["std"] for r in seed_results]),
-        "alpha": seed_results[0]["alpha"],  # Report alpha from primary seed
+        "median_cindex": median_c,
+        "mean_cindex": mean_c,
+        "sd": sd_c,
+        "ci_lower": ci_lower,
+        "ci_upper": ci_upper,
+        "alpha": seed_results[0]["alpha"],
         "seed_cindices": cindices,
-        "seed_range": range_c,
-        "stable": range_c < 0.03
+        "n_seeds": len(cindices),
     }
-
 
 def analyze_dataset(name, expr, surv, clin, consensus_genes, encode_fn):
     """Run full Step 8.3 analysis on one GEO dataset."""
@@ -300,9 +302,10 @@ def analyze_dataset(name, expr, surv, clin, consensus_genes, encode_fn):
                 f"Events: {events.sum()}")
 
     results = {}
+    
 
     # --- 1. Gene Signature Ridge Cox ---
-    logger.info(f"\n--- Gene Signature (64 genes, ridge Cox) ---")
+    logger.info(f"\n--- Gene Signature ({len(consensus_genes)} genes, ridge Cox) ---")
     res_genes = run_multi_seed_cv(
         expr_aligned, y_struct, events, label="Gene signature"
     )
@@ -384,12 +387,13 @@ def main():
             summary_rows.append({
                 "dataset": name,
                 "model": model,
-                "cv_cindex": res["cv_cindex"],
-                "std": res["std"],
+                "median_cindex": res["median_cindex"],
+                "mean_cindex": res["mean_cindex"],
+                "sd": res["sd"],
+                "ci_lower": res["ci_lower"],
+                "ci_upper": res["ci_upper"],
                 "best_alpha": res["alpha"],
-                "seed_range": res.get("seed_range", np.nan),
-                "stable": res.get("stable", None),
-                "seed_cindices": res.get("seed_cindices", [])
+                "n_seeds": res.get("n_seeds", 0),
             })
 
     summary_df = pd.DataFrame(summary_rows)
