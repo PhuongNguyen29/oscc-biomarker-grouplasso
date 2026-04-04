@@ -140,7 +140,7 @@ cat("GSE41613 expression:", nrow(expr41613), "probes ×", ncol(expr41613), "samp
 expr42743_full <- read.csv("data/external/GSE42743_rma_expression.csv", row.names = 1)
 dim(expr42743_full)
 head(rownames(expr42743_full), 10)
-
+expr42743 <- expr42743_full
 # Build probe-to-symbol mapping from hgu133plus2.db
 probe_to_symbol <- as.list(hgu133plus2SYMBOL)
 # Flatten: some probes map to NA
