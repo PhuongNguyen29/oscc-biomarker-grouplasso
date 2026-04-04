@@ -43,7 +43,7 @@ library(hgu133plus2.db)
 # Configuration
 # ==============================================================================
 
-CONSENSUS_PATH <- "results/phase4_stability_mad3000/consensus/cox_consensus_pi080.txt"
+CONSENSUS_PATH <- "results/phase4_stability_iqr/consensus/cox_consensus_pi080.txt"
 ANNOTATION_PATH <- "data/raw/protein_coding_genes_annotation.csv"
 OUTPUT_DIR <- "data/external"
 
