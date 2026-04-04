@@ -43,7 +43,7 @@ library(hgu133plus2.db)
 # Configuration
 # ==============================================================================
 
-CONSENSUS_PATH <- "results/phase4_stability_iqr/consensus/rra_consensus_rank750.txt"
+CONSENSUS_PATH <- "results/phase4_stability_iqr/consensus/rra_signfiltered_rank250.txt"
 ANNOTATION_PATH <- "data/raw/protein_coding_genes_annotation.csv"
 OUTPUT_DIR <- "data/external"
 
@@ -133,7 +133,7 @@ cat("GSE41613 expression:", nrow(expr41613), "probes ×", ncol(expr41613), "samp
 
 # gse42743 <- getGEO("GSE42743", GSEMatrix = TRUE)
 # expr42743 <- exprs(gse42743[[1]])
-# meta42743 <- pData(gse42743[[1]])
+meta42743 <- pData(gse42743[[1]])
 # cat("GSE42743 expression:", nrow(expr42743), "probes ×", ncol(expr42743), "samples\n")
 
 # Load full RMA expression (all probes)
