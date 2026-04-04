@@ -43,7 +43,7 @@ library(hgu133plus2.db)
 # Configuration
 # ==============================================================================
 
-CONSENSUS_PATH <- "results/phase4_stability_iqr/consensus/rra_signfiltered_rank350.txt"
+CONSENSUS_PATH <- "data/processed/iqr_filtered/retained_genes.txt"
 ANNOTATION_PATH <- "data/raw/protein_coding_genes_annotation.csv"
 OUTPUT_DIR <- "data/external"
 
