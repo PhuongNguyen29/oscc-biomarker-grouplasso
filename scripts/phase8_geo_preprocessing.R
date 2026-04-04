@@ -73,6 +73,15 @@ consensus_symbols <- ensg_to_symbol[consensus_ensg]
 mapped_mask <- !is.na(consensus_symbols)
 cat("Mapped to symbols:", sum(mapped_mask), "/", length(consensus_ensg), "\n")
 
+# Remove duplicate symbols (keep first ENSG per symbol)
+dup_mask <- duplicated(consensus_symbols[mapped_mask])
+if (any(dup_mask)) {
+  cat("  Duplicate symbols (removing):", sum(dup_mask), "\n")
+  # Show which ones
+  dup_syms <- consensus_symbols[mapped_mask][dup_mask]
+  cat("  ", paste(dup_syms, collapse = ", "), "\n")
+}
+
 if (any(!mapped_mask)) {
     cat("  Unmapped ENSG IDs:\n")
     cat("  ", consensus_ensg[!mapped_mask], "\n")
