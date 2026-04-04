@@ -87,10 +87,10 @@ logging.getLogger('src.data.data_loader').setLevel(logging.WARNING)
 # =============================================================================
 
 B_SUBSAMPLES = 50
-SUBSAMPLE_FRACTION = 0.50
+SUBSAMPLE_FRACTION = 0.80
 RANDOM_SEED = 42
 DATA_DIR = "data/processed"
-RESULTS_BASE_DEFAULT = "results/phase4_stability_iqr_half"
+RESULTS_BASE_DEFAULT = "results/phase4_stability_iqr"
 
 # k scan values
 K_SCAN = [50, 100, 150, 200, 300, 500, 750, 1000]
@@ -371,7 +371,9 @@ def rank_genes_cox(X_train, y_event_train, y_time_train, gene_names,
     Uses CoxnetSurvivalAnalysis(l1_ratio~0) with a single fixed alpha.
     If numerical overflow occurs, doubles alpha until fit succeeds.
 
-    Returns: list of (gene_name, importance_score) sorted by importance descending.
+    Returns:
+        ranking: list of (gene_name, importance_score) sorted by |coef| descending.
+        signed_coefs: dict mapping gene_name → signed coefficient value.
     """
     y_struct = np.array(
         [(bool(e), t) for e, t in zip(y_event_train, y_time_train)],
@@ -395,17 +397,21 @@ def rank_genes_cox(X_train, y_event_train, y_time_train, gene_names,
             if attempt == 4:
                 raise RuntimeError(f"Cox fit failed after 5 attempts, alpha={alpha}")
 
-    # Get absolute coefficients (single alpha → coef_ is (n_features, 1))
-    coefs = np.abs(model.coef_[:, 0])
+    # Get signed coefficients (single alpha → coef_ is (n_features, 1))
+    raw_coefs = model.coef_[:, 0]
+    abs_coefs = np.abs(raw_coefs)
+
+    # Signed coefficient dict for sign concordance analysis
+    signed_coefs = dict(zip(gene_names, raw_coefs))
 
     # Rank by |coefficient| descending
     ranking = sorted(
-        zip(gene_names, coefs),
+        zip(gene_names, abs_coefs),
         key=lambda x: x[1],
         reverse=True,
     )
 
-    return ranking
+    return ranking, signed_coefs
 
 
 # =============================================================================
@@ -664,20 +670,31 @@ def run_stability_for_cohort(
     logger.info(f"  Computing Cox rankings ({B_SUBSAMPLES} subsamples)...")
 
     cox_rankings = []
+    cox_signed_coefs = []  # Store signed coefficients per subsample
     for b in range(B_SUBSAMPLES):
         ss = subsamples[b]
-        ranking = rank_genes_cox(
+        ranking, signed_coefs = rank_genes_cox(
             X[ss['train_idx']], y_event[ss['train_idx']], y_time[ss['train_idx']],
             gene_names, fixed_alpha=ridge_lambda,
         )
         cox_rankings.append(ranking)
+        cox_signed_coefs.append(signed_coefs)
 
-        # Save ranking
+        # Save ranking (absolute values, same as before)
         rank_df = pd.DataFrame(ranking, columns=['gene', 'importance'])
         rank_df.to_csv(cox_rank_dir / f"subsample_{b+1:02d}.csv", index=False)
 
         if (b + 1) % 10 == 0:
             logger.info(f"    Cox: {b+1}/{B_SUBSAMPLES} complete")
+
+    # Save signed coefficient matrix (genes × subsamples)
+    signed_coef_dir = results_dir / "signed_coefficients" / cohort
+    signed_coef_dir.mkdir(parents=True, exist_ok=True)
+
+    signed_df = pd.DataFrame(cox_signed_coefs, columns=gene_names).T
+    signed_df.columns = [f"subsample_{b+1:02d}" for b in range(B_SUBSAMPLES)]
+    signed_df.to_csv(signed_coef_dir / "cox_signed_coefficients.csv")
+    logger.info(f"  Saved signed coefficient matrix: {signed_df.shape[0]} genes × {signed_df.shape[1]} subsamples")
 
     # --- DeepSurv + IG rankings ---
     logger.info(f"")
