@@ -397,7 +397,9 @@ clin42743 <- data.frame(
 expr42743_filtered <- expr42743_oc
 expr42743_z <- extract_expression(expr42743_filtered, mapped_genes, "GSE42743")
 
-# Align samples
+colnames(expr42743_z) <- sub("_.*", "", colnames(expr42743_z))
+
+# Now re-align
 common42743 <- intersect(colnames(expr42743_z), clinical42743$sampleID)
 expr42743_z <- expr42743_z[, common42743, drop = FALSE]
 surv42743 <- surv42743[surv42743$sampleID %in% common42743, ]
