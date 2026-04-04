@@ -131,10 +131,15 @@ expr41613 <- exprs(gse41613[[1]])
 meta41613 <- pData(gse41613[[1]])
 cat("GSE41613 expression:", nrow(expr41613), "probes ×", ncol(expr41613), "samples\n")
 
-gse42743 <- getGEO("GSE42743", GSEMatrix = TRUE)
-expr42743 <- exprs(gse42743[[1]])
-meta42743 <- pData(gse42743[[1]])
-cat("GSE42743 expression:", nrow(expr42743), "probes ×", ncol(expr42743), "samples\n")
+# gse42743 <- getGEO("GSE42743", GSEMatrix = TRUE)
+# expr42743 <- exprs(gse42743[[1]])
+# meta42743 <- pData(gse42743[[1]])
+# cat("GSE42743 expression:", nrow(expr42743), "probes ×", ncol(expr42743), "samples\n")
+
+# Load full RMA expression (all probes)
+expr42743_full <- read.csv("data/external/GSE42743_rma_expression.csv", row.names = 1)
+dim(expr42743_full)
+head(rownames(expr42743_full), 10)
 
 # Build probe-to-symbol mapping from hgu133plus2.db
 probe_to_symbol <- as.list(hgu133plus2SYMBOL)
