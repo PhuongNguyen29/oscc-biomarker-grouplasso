@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 SEED =  list(range(42, 142))
 N_FOLDS = 3
 DATA_DIR = Path("data/external")
-CONSENSUS_FILE = Path('results/phase4_stability_iqr/consensus/cox_consensus_pi080_concordant.txt')
+CONSENSUS_FILE = Path('results/phase4_stability_iqr/consensus/cox_consensus_pi080.txt')
 OUTPUT_DIR = Path("results/phase8_external_validation")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
