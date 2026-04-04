@@ -86,10 +86,12 @@ if (any(!mapped_mask)) {
     cat("  Unmapped ENSG IDs:\n")
     cat("  ", consensus_ensg[!mapped_mask], "\n")
 }
+mapped_ensg <- consensus_ensg[mapped_mask][!dup_mask]
+mapped_symbols <- consensus_symbols[mapped_mask][!dup_mask]
 
 # Create lookup tables
-symbol_to_ensg <- setNames(consensus_ensg[mapped_mask], consensus_symbols[mapped_mask])
-target_symbols <- consensus_symbols[mapped_mask]
+symbol_to_ensg <- setNames(mapped_ensg, mapped_symbols)
+target_symbols <- mapped_symbols
 cat("Target gene symbols:", length(target_symbols), "\n")
 
 # ==============================================================================
@@ -101,7 +103,7 @@ cat("\n--- Probe-to-gene mapping (Jetset + fallback) ---\n")
 # Use jmap to get best probe per gene directly
 jetset_best <- data.frame(
   symbol = target_symbols,
-  ensg = consensus_ensg[mapped_mask],
+  ensg = mapped_ensg,
   jetset_probe = NA_character_,
   fallback_probe = NA_character_,
   final_probe = NA_character_,
