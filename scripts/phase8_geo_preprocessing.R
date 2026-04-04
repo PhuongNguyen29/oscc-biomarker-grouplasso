@@ -374,9 +374,9 @@ clinical42743 <- clinical42743[valid42743, ]
 
 # Survival file
 surv42743 <- data.frame(
-  sampleID = clinical42743$sampleID[clinical42743$sampleID %in% common42743],
-  time = clinical42743$time[clinical42743$sampleID %in% common42743],
-  event = clinical42743$event[clinical42743$sampleID %in% common42743],
+  sampleID = clinical42743$sampleID,
+  time = clinical42743$time,
+  event = clinical42743$event,
   stringsAsFactors = FALSE
 )
 
