@@ -100,7 +100,7 @@ WEAKNESS_ALPHA = 0.5  # W_j ~ Uniform(WEAKNESS_ALPHA, 1)
 
 # Alpha scan: also test alphas that select more/fewer genes
 # to find the operating point with best consensus
-ALPHA_MULTIPLIERS = [0.5, 0.75, 1.0, 1.5, 2.0]
+ALPHA_MULTIPLIERS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1.0]
 
 
 # =============================================================================
