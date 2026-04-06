@@ -100,7 +100,7 @@ WEAKNESS_ALPHA = 0.5  # W_j ~ Uniform(WEAKNESS_ALPHA, 1)
 
 # Alpha scan: also test alphas that select more/fewer genes
 # to find the operating point with best consensus
-ALPHA_MULTIPLIERS = [0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+ALPHA_MULTIPLIERS = [0.25]
 
 
 # =============================================================================
@@ -381,25 +381,23 @@ def run_stability_for_cohort(
             'n_nonzero_per_sub': n_nonzero_per_sub,
         }
 
-        # Save selections and coefficients for primary multiplier (1.0x)
-        if mult == 1.0:
-            for b in range(B_SUBSAMPLES):
-                # Save selected gene list
-                sel_df = pd.DataFrame({
-                    'gene': all_selections[b],
-                })
-                sel_df.to_csv(sel_dir / f"subsample_{b+1:02d}.csv", index=False)
+        # Save selections, coefficients, and probabilities for all multipliers
+        mult_label = f"mult{mult:.2f}".replace(".", "p")
 
-            # Save signed coefficient matrix
-            signed_df = pd.DataFrame(all_signed_coefs, columns=gene_names).T
-            signed_df.columns = [f"subsample_{b+1:02d}" for b in range(B_SUBSAMPLES)]
-            signed_df.to_csv(coef_dir / "cox_signed_coefficients.csv")
+        for b in range(B_SUBSAMPLES):
+            sel_df = pd.DataFrame({
+                'gene': all_selections[b],
+            })
+            sel_df.to_csv(sel_dir / f"{mult_label}_subsample_{b+1:02d}.csv", index=False)
 
-            # Save selection probabilities
-            prob_dir = results_dir / "selection_probabilities"
-            prob_dir.mkdir(parents=True, exist_ok=True)
-            sel_probs.to_csv(prob_dir / f"{cohort}_cox_selection_probs.csv",
-                            header=["selection_prob"])
+        signed_df = pd.DataFrame(all_signed_coefs, columns=gene_names).T
+        signed_df.columns = [f"subsample_{b+1:02d}" for b in range(B_SUBSAMPLES)]
+        signed_df.to_csv(coef_dir / f"cox_signed_coefficients_{mult_label}.csv")
+
+        prob_dir = results_dir / "selection_probabilities"
+        prob_dir.mkdir(parents=True, exist_ok=True)
+        sel_probs.to_csv(prob_dir / f"{cohort}_cox_selection_probs_{mult_label}.csv",
+                        header=["selection_prob"])
 
     return all_alpha_results
 
