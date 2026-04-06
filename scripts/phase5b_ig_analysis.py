@@ -61,14 +61,10 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 
-PHASE3_DIR = Path("results/phase3_cross_fitted")
-PHASE4_DIR = Path("results/phase4_stability_mad3000")
+PHASE7_DIR = Path("results/phase7_percohort_mult0.6_pi60/deepsurv")
 RESULTS_DIR = Path("results/phase5")
 DATA_DIR = Path("data/processed")
 RAW_DIR = Path("data/raw")
-
-SEEDS = [42, 123, 456]
-PRIMARY_SEED = 42  # Primary seed for main analyses; others for sensitivity
 
 ANNOTATION_FILE = RAW_DIR / "protein_coding_genes_annotation.csv"
 
@@ -106,11 +102,19 @@ def load_clinical(cohort_name: str) -> pd.DataFrame:
     return clin
 
 
-def load_ig_attributions(seed: int, direction: str) -> pd.DataFrame:
-    """Load aggregated out-of-fold IG attributions for a given seed and direction."""
-    ig_file = (PHASE3_DIR / f"seed_{seed}" / "aggregated" /
-               f"{direction}_deepsurv_ig_all.csv")
+def load_ig_attributions(direction: str) -> pd.DataFrame:
+    """Load out-of-sample IG attributions from Phase 7 bidirectional validation.
+    
+    Args:
+        direction: 'tcga_to_orien' or 'orien_to_tcga'
+        
+    Returns:
+        DataFrame with sampleID as index, genes as columns.
+    """
+    ig_file = PHASE7_IG_DIR / f"deepsurv_ig_{direction}_test.csv"
     ig = pd.read_csv(ig_file, index_col=0)
+    logger.info(f"  Loaded IG attributions: {ig_file.name} "
+                f"({ig.shape[0]} patients × {ig.shape[1]} genes)")
     return ig
 
 
@@ -175,7 +179,9 @@ def analysis_5_3(consensus_genes: list, out_dir: Path):
     Similar proportions = consistent effect direction across independently
     trained models.
 
-    Uses primary seed (42) for main results, all seeds for sensitivity.
+    Uses out-of-sample IG attributions from Phase 7 bidirectional validation.
+    Cross-cohort consistency (TCGA-trained vs ORIEN-trained) serves as the
+    robustness check in place of the old multi-seed sensitivity analysis.
     """
     logger.info("=" * 70)
     logger.info("ANALYSIS 5.3: Gene-Level IG Sign Concordance")
@@ -187,94 +193,74 @@ def analysis_5_3(consensus_genes: list, out_dir: Path):
     annot = pd.read_csv(ANNOTATION_FILE)
     ensg_to_symbol = dict(zip(annot['gene_id'], annot['gene_symbol']))
 
-    all_seed_results = {}
+    # Direction 1: TCGA-trained model → ORIEN patients (out-of-sample)
+    ig_t2o = load_ig_attributions('tcga_to_orien')
+    # Direction 2: ORIEN-trained model → TCGA patients (out-of-sample)
+    ig_o2t = load_ig_attributions('orien_to_tcga')
 
-    for seed in SEEDS:
-        logger.info(f"")
-        logger.info(f"  --- Seed {seed} ---")
+    gene_results = []
 
-        # Direction 1: TCGA-trained model → ORIEN patients
-        ig_t2o = load_ig_attributions(seed, 'tcga_to_orien')
-        # Direction 2: ORIEN-trained model → TCGA patients
-        ig_o2t = load_ig_attributions(seed, 'orien_to_tcga')
+    for gene in consensus_genes:
+        if gene not in ig_t2o.columns or gene not in ig_o2t.columns:
+            logger.warning(f"  Gene {gene} not found in IG files, skipping")
+            continue
 
-        gene_results = []
+        # Proportion with positive IG in each direction
+        orien_positive = (ig_t2o[gene] > 0).mean()
+        tcga_positive = (ig_o2t[gene] > 0).mean()
 
-        for gene in consensus_genes:
-            if gene not in ig_t2o.columns or gene not in ig_o2t.columns:
-                continue
+        # Absolute difference captures divergence between cohorts
+        abs_diff = abs(orien_positive - tcga_positive)
 
-            # Proportion with positive IG in each direction
-            orien_positive = (ig_t2o[gene] > 0).mean()
-            tcga_positive = (ig_o2t[gene] > 0).mean()
+        # Direction agreement: both > 0.5 or both < 0.5
+        same_majority = (orien_positive > 0.5) == (tcga_positive > 0.5)
 
-            # Concordance: how similar are the proportions?
-            # Both near 0.5 = mixed signal; both near 0 or 1 = consistent direction
-            # Absolute difference captures divergence
-            abs_diff = abs(orien_positive - tcga_positive)
+        symbol = ensg_to_symbol.get(gene, gene)
 
-            # Direction agreement: both > 0.5 or both < 0.5
-            same_majority = (orien_positive > 0.5) == (tcga_positive > 0.5)
+        gene_results.append({
+            'gene': gene,
+            'symbol': symbol,
+            'orien_prop_positive': float(orien_positive),
+            'tcga_prop_positive': float(tcga_positive),
+            'abs_diff': float(abs_diff),
+            'same_majority_direction': bool(same_majority),
+            'orien_n': len(ig_t2o),
+            'tcga_n': len(ig_o2t),
+        })
 
-            symbol = ensg_to_symbol.get(gene, gene)
+    df = pd.DataFrame(gene_results)
+    df.to_csv(out_dir / "sign_concordance_per_gene.csv", index=False)
 
-            gene_results.append({
-                'gene': gene,
-                'symbol': symbol,
-                'orien_prop_positive': float(orien_positive),
-                'tcga_prop_positive': float(tcga_positive),
-                'abs_diff': float(abs_diff),
-                'same_majority_direction': bool(same_majority),
-                'orien_n': len(ig_t2o),
-                'tcga_n': len(ig_o2t),
-            })
+    n_concordant = df['same_majority_direction'].sum()
+    n_total = len(df)
+    median_diff = df['abs_diff'].median()
+    mean_orien = df['orien_prop_positive'].mean()
+    mean_tcga = df['tcga_prop_positive'].mean()
 
-        df = pd.DataFrame(gene_results)
-        all_seed_results[str(seed)] = df
+    logger.info(f"  Genes with same majority direction: "
+                f"{n_concordant}/{n_total} ({100*n_concordant/n_total:.1f}%)")
+    logger.info(f"  Median |prop_diff| across genes: {median_diff:.3f}")
+    logger.info(f"  Mean proportion positive (ORIEN patients): {mean_orien:.3f}")
+    logger.info(f"  Mean proportion positive (TCGA patients): {mean_tcga:.3f}")
 
-        if seed == PRIMARY_SEED:
-            df.to_csv(out_dir / "sign_concordance_per_gene.csv", index=False)
-
-            n_concordant = df['same_majority_direction'].sum()
-            n_total = len(df)
-            median_diff = df['abs_diff'].median()
-            mean_orien = df['orien_prop_positive'].mean()
-            mean_tcga = df['tcga_prop_positive'].mean()
-
-            logger.info(f"  Genes with same majority direction: "
-                        f"{n_concordant}/{n_total} ({100*n_concordant/n_total:.1f}%)")
-            logger.info(f"  Median |prop_diff| across genes: {median_diff:.3f}")
-            logger.info(f"  Mean proportion positive (ORIEN patients): {mean_orien:.3f}")
-            logger.info(f"  Mean proportion positive (TCGA patients): {mean_tcga:.3f}")
-
-    # Summary across seeds
-    primary_df = all_seed_results[str(PRIMARY_SEED)]
     summary = {
-        'primary_seed': PRIMARY_SEED,
-        'n_consensus_genes': len(primary_df),
-        'n_same_majority_direction': int(primary_df['same_majority_direction'].sum()),
-        'proportion_concordant': float(primary_df['same_majority_direction'].mean()),
-        'median_abs_diff': float(primary_df['abs_diff'].median()),
-        'mean_abs_diff': float(primary_df['abs_diff'].mean()),
-        'mean_orien_prop_positive': float(primary_df['orien_prop_positive'].mean()),
-        'mean_tcga_prop_positive': float(primary_df['tcga_prop_positive'].mean()),
-        'sensitivity_across_seeds': {},
+        'n_consensus_genes': int(n_total),
+        'n_same_majority_direction': int(n_concordant),
+        'proportion_concordant': float(n_concordant / n_total) if n_total > 0 else 0,
+        'median_abs_diff': float(median_diff),
+        'mean_abs_diff': float(df['abs_diff'].mean()),
+        'mean_orien_prop_positive': float(mean_orien),
+        'mean_tcga_prop_positive': float(mean_tcga),
+        'ig_source': 'Phase 7 bidirectional validation (out-of-sample test splits)',
+        'orien_n_patients': int(len(ig_t2o)),
+        'tcga_n_patients': int(len(ig_o2t)),
         'note': (
             'Proportions near 0.5 indicate ~50% of patients have positive IG for that gene. '
-            'This reflects patient-level heterogeneity, not necessarily noise. '
-            'Same_majority_direction indicates whether the majority sign is consistent '
-            'across independently trained models.'
+            'This reflects patient-level heterogeneity (z-scored expression, mean baseline), '
+            'not necessarily noise. Same_majority_direction indicates whether the majority '
+            'sign is consistent across independently trained models.'
         ),
     }
-
-    # Seed sensitivity
-    for seed in SEEDS:
-        sdf = all_seed_results[str(seed)]
-        summary['sensitivity_across_seeds'][str(seed)] = {
-            'n_concordant': int(sdf['same_majority_direction'].sum()),
-            'proportion_concordant': float(sdf['same_majority_direction'].mean()),
-            'median_abs_diff': float(sdf['abs_diff'].median()),
-        }
 
     with open(out_dir / "sign_concordance_summary.json", 'w') as f:
         json.dump(summary, f, indent=2)
@@ -282,8 +268,7 @@ def analysis_5_3(consensus_genes: list, out_dir: Path):
     logger.info("")
     logger.info("  Analysis 5.3 complete.")
 
-    return primary_df
-
+    return df
 
 # =============================================================================
 # Analysis 5.5: IG-Based vs Expression-Based Stratification
@@ -322,7 +307,7 @@ def analysis_5_5(consensus_genes: list, out_dir: Path):
         else:
             ig_direction = 'tcga_to_orien'
 
-        ig = load_ig_attributions(PRIMARY_SEED, ig_direction)
+        ig = load_ig_attributions(ig_direction)
 
         # Align all data by sample ID
         common_ids = (expr.columns
