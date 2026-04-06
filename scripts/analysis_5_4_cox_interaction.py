@@ -21,10 +21,10 @@ Reference:
       regression: a bad idea. Statistics in Medicine.
 
 Design:
-    - 64 consensus genes × 6 clinical variables × 2 cohorts = 768 models
+    - 25 consensus genes × 6 clinical variables × 2 cohorts = 300 models
     - Age: continuous (per Royston et al., 2006)
     - Other 5 clinical variables: binary (0/1)
-    - FDR correction: BH per cohort (384 tests each)
+    - FDR correction: BH per cohort (150 tests each)
     - Unknown values: excluded per-variable, not globally
 
 Input files:
@@ -59,8 +59,7 @@ BASE_DIR = Path(".")
 DATA_DIR = BASE_DIR / "data" / "processed"
 RAW_DIR = BASE_DIR / "data" / "raw"
 CONSENSUS_PATH = (
-    BASE_DIR / "results" / "phase4_stability_mad3000" / "consensus"
-    / "cox_consensus_pi080.txt"
+    BASE_DIR / "results" / "phase7_percohort_mult0.6_pi60" / "union_genes.txt"
 )
 ANNOTATION_PATH = RAW_DIR / "protein_coding_genes_annotation.csv"
 OUTPUT_DIR = BASE_DIR / "results" / "phase5" / "analysis_5_4"
