@@ -585,7 +585,7 @@ if __name__ == "__main__":
                                         f"TCGA pi={t_pi:.2f}, ORIEN pi={o_pi:.2f}")
 
                 # Save per-cohort stable gene lists
-                if pi == PI_PRIMARY:
+                if True:
                     for cohort_name, stable_genes in [
                         ('tcga', result['stable_c1_genes']),
                         ('orien', result['stable_c2_genes'])
