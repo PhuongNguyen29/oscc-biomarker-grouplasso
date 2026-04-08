@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 DATA_DIR = Path("data/external")
-CONSENSUS_FILE = Path("results/phase4_stability_mad3000/consensus/cox_consensus_pi080.txt")
+CONSENSUS_FILE = Path("results/sensitivity_sweep/mult0.6_pi60/union_genes.txt")
 ANNOTATION_FILE = Path("data/raw/protein_coding_genes_annotation.csv")
 OUTPUT_DIR = Path("results/phase8_external_validation")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
