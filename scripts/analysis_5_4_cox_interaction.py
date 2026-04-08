@@ -31,15 +31,15 @@ Input files:
     - data/processed/{tcga,orien}_preprocessed_v4.csv
     - data/processed/surv_{tcga,orien}_aligned_v4.csv
     - data/processed/clinical_{tcga,orien}_aligned_v4.csv
-    - results/phase4_stability_mad3000/consensus/cox_consensus_pi080.txt
+    - results/sensitivity_sweep/mult0.6_pi60/union_genes.txt
     - data/raw/protein_coding_genes_annotation.csv
 
 Output files:
-    - results/phase5/analysis_5_4/analysis_5_4_interaction_results.csv
-    - results/phase5/analysis_5_4/analysis_5_4_summary.txt
+    - results/phase5_corrected/analysis_5_4/analysis_5_4_interaction_results.csv
+    - results/phase5_corrected/analysis_5_4/analysis_5_4_summary.txt
 
 Author: Phuong Nguyen
-Date: February 2026
+Date: February 2026 (updated April 2026 for corrected 25-gene union set)
 """
 
 import pandas as pd
@@ -59,10 +59,10 @@ BASE_DIR = Path(".")
 DATA_DIR = BASE_DIR / "data" / "processed"
 RAW_DIR = BASE_DIR / "data" / "raw"
 CONSENSUS_PATH = (
-    BASE_DIR / "results" / "phase7_percohort_mult0.6_pi60" / "union_genes.txt"
+    BASE_DIR / "results" / "sensitivity_sweep" / "mult0.6_pi60" / "union_genes.txt"
 )
 ANNOTATION_PATH = RAW_DIR / "protein_coding_genes_annotation.csv"
-OUTPUT_DIR = BASE_DIR / "results" / "phase5" / "analysis_5_4"
+OUTPUT_DIR = BASE_DIR / "results" / "phase5_corrected" / "analysis_5_4"
 
 COHORTS = ["tcga", "orien"]
 

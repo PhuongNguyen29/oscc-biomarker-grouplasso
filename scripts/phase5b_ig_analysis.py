@@ -1,7 +1,7 @@
 """
-Phase 5b: IG Sign Concordance and Stratified Survival Analysis
+Phase 5b: IG Sign Concordance and Stratified Survival Analysis (Corrected Pipeline)
 
-Analyses 5.3 and 5.5 from the v4 pipeline document.
+Analyses 5.3 and 5.5 for the 25-gene union set.
 
 Analysis 5.3: Gene-Level Sign Concordance Between Cohorts
     For each consensus gene:
@@ -30,7 +30,7 @@ Usage:
     PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase5b_ig_analysis.py
 
 Output:
-    results/phase5/
+    results/phase5_corrected/
         analysis_5_3/
             sign_concordance_per_gene.csv
             sign_concordance_summary.json
@@ -61,14 +61,17 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 
-PHASE7_DIR = Path("results/phase7_percohort_mult0.6_pi60/deepsurv")
-RESULTS_DIR = Path("results/phase5")
+SWEEP_DIR = Path("results/sensitivity_sweep/mult0.6_pi60")
+PHASE7_IG_DIR = SWEEP_DIR / "validation" / "deepsurv"
+CONSENSUS_PATH = SWEEP_DIR / "union_genes.txt"
+
+RESULTS_DIR = Path("results/phase5_corrected")
 DATA_DIR = Path("data/processed")
 RAW_DIR = Path("data/raw")
 
 ANNOTATION_FILE = RAW_DIR / "protein_coding_genes_annotation.csv"
 
-# Clinical strata definitions (v4: 12 strata = 6 variables × 2 levels)
+# Clinical strata definitions (6 variables × 2 levels = 12 strata)
 CLINICAL_STRATA = {
     'age': {'column': 'age', 'type': 'continuous', 'threshold': 65,
             'labels': ['≤65', '>65']},
@@ -91,6 +94,13 @@ MIN_EVENTS_PER_GROUP = 5
 # Helper Functions
 # =============================================================================
 
+def load_consensus_genes() -> list:
+    """Load 25-gene union set."""
+    genes = CONSENSUS_PATH.read_text().strip().split('\n')
+    logger.info(f"  Consensus genes: {len(genes)}")
+    return genes
+
+
 def load_clinical(cohort_name: str) -> pd.DataFrame:
     """Load clinical data and encode N_stage as N0 vs N+."""
     clin = pd.read_csv(DATA_DIR / f"clinical_{cohort_name}_aligned_v4.csv")
@@ -104,10 +114,10 @@ def load_clinical(cohort_name: str) -> pd.DataFrame:
 
 def load_ig_attributions(direction: str) -> pd.DataFrame:
     """Load out-of-sample IG attributions from Phase 7 bidirectional validation.
-    
+
     Args:
         direction: 'tcga_to_orien' or 'orien_to_tcga'
-        
+
     Returns:
         DataFrame with sampleID as index, genes as columns.
     """
@@ -144,6 +154,8 @@ def stratify_patients(clinical_df: pd.DataFrame, stratum_name: str):
     col = spec['column']
     labels = spec['labels']
 
+    valid = pd.Series(False, index=clinical_df.index)
+
     if spec['type'] == 'continuous':
         threshold = spec['threshold']
         valid = clinical_df[col].notna()
@@ -156,14 +168,13 @@ def stratify_patients(clinical_df: pd.DataFrame, stratum_name: str):
         group1 = valid & (clinical_df[col] == vals[1])
     elif spec['type'] == 'categorical':
         vals = spec['values']
-        # Exclude Unknown
         valid = clinical_df[col].isin(vals)
         group0 = valid & (clinical_df[col] == vals[0])
         group1 = valid & (clinical_df[col] == vals[1])
 
-    n_excluded = (~valid).sum() if 'valid' in dir() else 0
+    n_excluded = int((~valid).sum())
 
-    return group0, group1, labels[0], labels[1], int(n_excluded)
+    return group0, group1, labels[0], labels[1], n_excluded
 
 
 # =============================================================================
@@ -180,8 +191,6 @@ def analysis_5_3(consensus_genes: list, out_dir: Path):
     trained models.
 
     Uses out-of-sample IG attributions from Phase 7 bidirectional validation.
-    Cross-cohort consistency (TCGA-trained vs ORIEN-trained) serves as the
-    robustness check in place of the old multi-seed sensitivity analysis.
     """
     logger.info("=" * 70)
     logger.info("ANALYSIS 5.3: Gene-Level IG Sign Concordance")
@@ -585,7 +594,7 @@ def analysis_5_5(consensus_genes: list, out_dir: Path):
         'min_events_threshold': MIN_EVENTS_PER_GROUP,
         'clinical_strata': list(CLINICAL_STRATA.keys()),
         'n_consensus_genes': len(consensus_genes),
-        'primary_seed': PRIMARY_SEED,
+        'validation_design': 'single_run_bidirectional',
         'method': 'KM + log-rank per gene per stratum',
         'expression_split': 'z-score > 0 (above population mean) vs <= 0',
         'ig_split': 'IG attribution > 0 (positive) vs <= 0 (negative)',
@@ -640,15 +649,13 @@ if __name__ == "__main__":
     )
     logging.getLogger().addHandler(file_handler)
 
-    logger.info("Phase 5b: IG Sign Concordance and Stratified Analysis")
-    logger.info(f"Phase 3 results: {PHASE3_DIR}")
-    logger.info(f"Phase 4 results: {PHASE4_DIR}")
+    logger.info("Phase 5b: IG Sign Concordance and Stratified Analysis (Corrected Pipeline)")
+    logger.info(f"IG attributions: {PHASE7_IG_DIR}")
+    logger.info(f"Consensus genes: {CONSENSUS_PATH}")
     logger.info(f"Output: {RESULTS_DIR}")
 
     # Load consensus genes
-    consensus_file = PHASE4_DIR / "consensus" / "cox_consensus_pi080.txt"
-    consensus_genes = consensus_file.read_text().strip().split('\n')
-    logger.info(f"Consensus genes: {len(consensus_genes)}")
+    consensus_genes = load_consensus_genes()
 
     # Run Analysis 5.3
     concordance_df = analysis_5_3(consensus_genes, RESULTS_DIR / "analysis_5_3")

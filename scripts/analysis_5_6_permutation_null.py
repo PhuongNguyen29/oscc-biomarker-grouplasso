@@ -22,7 +22,7 @@ Reference:
 Design:
     - Observed statistic: count of (gene × stratum_level) pairs where
       expression-based HR is on the same side of 1.0 in both cohorts,
-      out of 768 total units (64 genes × 6 variables × 2 levels).
+      out of 25 genes × 6 variables × 2 levels = 300 total units.
     - Expression-based stratification: split at z-score = 0 within each
       clinical stratum, fit univariate Cox, extract HR direction.
     - Permutation: shuffle (time, event) within each stratum level,
@@ -36,17 +36,17 @@ Input files:
     - data/processed/{tcga,orien}_preprocessed_v4.csv
     - data/processed/surv_{tcga,orien}_aligned_v4.csv
     - data/processed/clinical_{tcga,orien}_aligned_v4.csv
-    - results/phase4_stability_mad3000/consensus/cox_consensus_pi080.txt
+    - results/sensitivity_sweep/mult0.6_pi60/union_genes.txt
 
 Output files:
-    - results/phase5/analysis_5_6/analysis_5_6_permutation_results.csv
-    - results/phase5/analysis_5_6/analysis_5_6_null_distribution.csv
-    - results/phase5/analysis_5_6/analysis_5_6_per_variable_breakdown.csv
-    - results/phase5/analysis_5_6/analysis_5_6_summary.txt
-    - results/phase5/analysis_5_6/checkpoint_null_dist.npy (periodic)
+    - results/phase5_corrected/analysis_5_6/analysis_5_6_permutation_results.csv
+    - results/phase5_corrected/analysis_5_6/analysis_5_6_null_distribution.csv
+    - results/phase5_corrected/analysis_5_6/analysis_5_6_per_variable_breakdown.csv
+    - results/phase5_corrected/analysis_5_6/analysis_5_6_summary.txt
+    - results/phase5_corrected/analysis_5_6/checkpoint_null_dist.npy (periodic)
 
 Author: Phuong Nguyen
-Date: February 2026
+Date: February 2026 (updated April 2026 for corrected 25-gene union set)
 """
 
 import pandas as pd
@@ -64,10 +64,9 @@ import time
 BASE_DIR = Path(".")
 DATA_DIR = BASE_DIR / "data" / "processed"
 CONSENSUS_PATH = (
-    BASE_DIR / "results" / "phase4_stability_mad3000" / "consensus"
-    / "cox_consensus_pi080.txt"
+    BASE_DIR / "results" / "sensitivity_sweep" / "mult0.6_pi60" / "union_genes.txt"
 )
-OUTPUT_DIR = BASE_DIR / "results" / "phase5" / "analysis_5_6"
+OUTPUT_DIR = BASE_DIR / "results" / "phase5_corrected" / "analysis_5_6"
 CHECKPOINT_PATH = OUTPUT_DIR / "checkpoint_null_dist.npy"
 
 COHORTS = ["tcga", "orien"]
@@ -621,9 +620,6 @@ def run_analysis():
         obs_var = int(var_conc["concordant"].sum())
         total_var = len(var_conc)
 
-        # Compute per-variable null concordance from stored full permutation
-        # (We didn't store per-variable breakdown during permutation for efficiency.
-        #  Report only observed per-variable counts vs. expected under independence.)
         # Expected under random: 50% concordance (HR direction is binary)
         expected_var = total_var * 0.5
 
@@ -685,6 +681,9 @@ def run_analysis():
     # 4. Text summary
     elapsed_total = time.time() - start_time
 
+    n_genes = len(available_genes)
+    max_units = n_genes * 6 * 2
+
     summary_lines = [
         "=" * 70,
         "Analysis 5.6: Conditional Permutation Null — Summary",
@@ -693,9 +692,9 @@ def run_analysis():
         "Reference: Phipson & Smyth (2010), permutation p-values.",
         "",
         "Design:",
-        f"  Consensus genes: {len(available_genes)}",
+        f"  Consensus genes: {n_genes}",
         f"  Clinical variables: {len(CLINICAL_STRATA)} (6 vars × 2 levels = 12 strata)",
-        f"  Total concordance units: 64 × 6 × 2 = 768 (theoretical maximum)",
+        f"  Total concordance units: {n_genes} × 6 × 2 = {max_units} (theoretical maximum)",
         f"  Testable units (≥{MIN_EVENTS_PER_GROUP} events/group in both cohorts): {len(testable_set)}",
         f"  Permutations: {len(valid_nulls)}",
         f"  Random seed: {RANDOM_SEED}",

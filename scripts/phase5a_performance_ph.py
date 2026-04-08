@@ -1,41 +1,33 @@
 """
-Phase 5a: Performance Comparison, Pathway Enrichment, and PH Testing
+Phase 5a: Performance Comparison and PH Testing (Corrected Pipeline)
 
-Analyses 5.1 and 5.2 from the v4 pipeline document.
+Analyses 5.1 and 5.2 for the 25-gene union set.
 
 Analysis 5.1: Cox vs. DeepSurv Comparison
-    - Out-of-fold C-index from Phase 3 (3 seeds × 2 directions × 2 methods)
-    - Gene overlap: Jaccard between Cox and DeepSurv consensus sets
-    - Pathway enrichment: ORA on 64 Cox consensus genes using MSigDB
-      (Hallmark, KEGG, GO:BP, C7 Immunologic)
+    - Phase 7 bidirectional C-indices (2 directions × 2 methods)
+    - Gene overlap between per-cohort Cox stable sets
+    - DeepSurv produced 0 consensus genes (expected)
 
 Analysis 5.2: Proportional Hazards Assumption
-    - Schoenfeld residual test for each consensus gene (univariate Cox)
-    - Schoenfeld test for the overall out-of-fold risk score
-    - Reports proportion of genes with PH violations
+    5.2a: Schoenfeld residual test for each consensus gene (univariate Cox)
+    5.2b: Schoenfeld test for the overall out-of-sample DeepSurv risk score
 
 All analyses are descriptive/exploratory. No significance claims.
 Gene set was selected using TCGA+ORIEN outcomes (post-selection).
 
 References:
     - Grambsch & Therneau (1994) — Schoenfeld residuals
-    - Boyle et al. (2004) Bioinformatics — GO enrichment / ORA
-    - Subramanian et al. (2005) PNAS — Gene set enrichment / MSigDB
+    - Katzman et al. (2018) — DeepSurv
 
 Usage:
     cd ~/hpchome/oscc-biomarker-grouplasso
     PYTHONPATH="${PWD}:${PYTHONPATH}" python scripts/phase5a_performance_ph.py
 
 Output:
-    results/phase5/
+    results/phase5_corrected/
         analysis_5_1/
             performance_summary.json
             gene_overlap.json
-            enrichment_hallmark.csv
-            enrichment_kegg.csv
-            enrichment_go_bp.csv
-            enrichment_c7_immunesigdb.csv
-            enrichment_summary.json
         analysis_5_2/
             schoenfeld_per_gene_tcga.csv
             schoenfeld_per_gene_orien.csv
@@ -63,27 +55,23 @@ logger = logging.getLogger(__name__)
 # Configuration
 # =============================================================================
 
-PHASE2_DIR = Path("results/phase2_tuning")
-PHASE7_DIR = Path("results/phase7_percohort_mult0.6_pi60")
-PHASE7_IG_DIR = PHASE7_DIR / "deepsurv"
+SWEEP_DIR = Path("results/sensitivity_sweep/mult0.6_pi60")
+PHASE7_DIR = SWEEP_DIR / "validation"
+DEEPSURV_DIR = PHASE7_DIR / "deepsurv"
+
 RESULTS_DIR = Path("results/phase5_corrected")
 DATA_DIR = Path("data/processed")
 RAW_DIR = Path("data/raw")
 
 ANNOTATION_FILE = RAW_DIR / "protein_coding_genes_annotation.csv"
-CONSENSUS_PATH = PHASE7_DIR / "union_genes.txt"
+CONSENSUS_PATH = SWEEP_DIR / "union_genes.txt"
 
-
-# GMT files (MSigDB v2026.1)
-GMT_FILES = {
-    'Hallmark': RAW_DIR / "h.all.v2026.1.Hs.symbols.gmt",
-    'KEGG': RAW_DIR / "c2.cp.kegg_medicus.v2026.1.Hs.symbols.gmt",
-    'GO_BP': RAW_DIR / "c5.go.bp.v2026.1.Hs.symbols.gmt",
-    'C7_Immunologic': RAW_DIR / "c7.immunesigdb.v2026.1.Hs.symbols.gmt",
+# IG attribution paths (out-of-sample test splits from Phase 7)
+IG_PATHS = {
+    'tcga_to_orien': DEEPSURV_DIR / "deepsurv_ig_tcga_to_orien_test.csv",
+    'orien_to_tcga': DEEPSURV_DIR / "deepsurv_ig_orien_to_tcga_test.csv",
 }
 
-# Enrichment significance threshold (descriptive, not used for claims)
-ENRICHMENT_FDR_THRESHOLD = 0.05
 
 def load_phase7_summary() -> dict:
     """Load Phase 7 validation summary."""
@@ -95,20 +83,48 @@ def load_phase7_summary() -> dict:
 
 
 def load_consensus_genes() -> list:
-    """Load 25-gene union set from Phase 7."""
+    """Load 25-gene union set."""
     genes = CONSENSUS_PATH.read_text().strip().split('\n')
     logger.info(f"  Consensus genes: {len(genes)}")
     return genes
 
 
+def load_ig_risk_scores(direction: str) -> pd.Series:
+    """
+    Derive risk scores from saved IG attributions by summing across genes.
+
+    By the completeness axiom of Integrated Gradients (Sundararajan et al.,
+    2017), sum of IG attributions equals f(x) - f(baseline). With a zero
+    baseline, this equals the model's log-hazard output. Since the PH test
+    only uses ranks, adding a constant (the baseline output) does not affect
+    the Schoenfeld residual test.
+
+    Args:
+        direction: 'tcga_to_orien' or 'orien_to_tcga'
+
+    Returns:
+        pd.Series with sampleID index, IG-sum (≈ log-hazard) as values
+    """
+    ig_file = IG_PATHS[direction]
+    ig_df = pd.read_csv(ig_file, index_col=0)
+    risk_scores = ig_df.sum(axis=1)
+    risk_scores.name = 'risk_score'
+    logger.info(f"  Loaded IG risk scores from {ig_file.name} "
+                f"({len(risk_scores)} patients)")
+    return risk_scores
+
+
 # =============================================================================
 # Analysis 5.1: Cox vs. DeepSurv Comparison
 # =============================================================================
-def analysis_5_1(out_dir: Path):
+
+def analysis_5_1(out_dir: Path) -> list:
     """
     5.1a: Performance comparison from Phase 7 bidirectional validation.
-    5.1b: Gene overlap between Cox and DeepSurv stable sets.
-    5.1c: Pathway enrichment on union consensus genes.
+    5.1b: Gene overlap between per-cohort Cox stable sets.
+
+    Returns:
+        consensus_genes: list of 25 union gene IDs
     """
     logger.info("=" * 70)
     logger.info("ANALYSIS 5.1: Cox vs. DeepSurv Comparison")
@@ -165,10 +181,8 @@ def analysis_5_1(out_dir: Path):
     logger.info("")
     logger.info("  --- 5.1b: Gene Overlap ---")
 
-    # Load union gene set details from Phase 7
-    union_df = pd.read_csv(PHASE7_DIR / "union_gene_set.csv")
+    union_df = pd.read_csv(SWEEP_DIR / "union_gene_set.csv")
 
-    # Phase 4 corrected: Cox produced stable genes, DeepSurv produced 0
     tcga_stable = phase7['gene_sets']['tcga_stable']
     orien_stable = phase7['gene_sets']['orien_stable']
     overlap_n = phase7['gene_sets']['overlap']
@@ -198,32 +212,127 @@ def analysis_5_1(out_dir: Path):
     with open(out_dir / "gene_overlap.json", 'w') as f:
         json.dump(gene_overlap, f, indent=2)
 
+    # Return consensus gene list for downstream analyses
+    consensus_genes = load_consensus_genes()
+    return consensus_genes
+
 
 # =============================================================================
 # Analysis 5.2: Proportional Hazards Assumption
 # =============================================================================
 
-def analysis_5_2(cox_genes: set, out_dir: Path):
+def analysis_5_2(consensus_genes: list, out_dir: Path):
     """
-    Test PH assumption for each consensus gene (univariate Cox)
-    and for the overall out-of-fold DeepSurv risk score.
+    Test PH assumption using Schoenfeld residuals (Grambsch & Therneau, 1994).
 
-    Uses Schoenfeld residuals (Grambsch & Therneau, 1994).
+    5.2a: Per-gene univariate Cox PH test for each consensus gene.
+    5.2b: Overall DeepSurv risk score PH test (out-of-sample).
     """
-    # -----------------------------------------------------------------
-    # PH test on overall DeepSurv risk score
-    # -----------------------------------------------------------------
     logger.info("")
-    logger.info("  --- Overall Risk Score PH Test ---")
+    logger.info("=" * 70)
+    logger.info("ANALYSIS 5.2: Proportional Hazards Assumption")
+    logger.info("=" * 70)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     from src.data.data_loader import load_cohort
-    consensus_genes = load_consensus_genes()
+
+    # Load annotation for gene symbols
+    annot = pd.read_csv(ANNOTATION_FILE)
+    ensg_to_symbol = dict(zip(annot['gene_id'], annot['gene_symbol']))
+
+    # Load data for both cohorts
+    cohort_data = {}
+    for cohort_name in ['tcga', 'orien']:
+        expr, surv = load_cohort(cohort_name, str(DATA_DIR))
+        cohort_data[cohort_name] = {'expr': expr, 'surv': surv}
+        logger.info(f"  Loaded {cohort_name.upper()}: {expr.shape[1]} samples, "
+                    f"{int(surv['event'].sum())} events")
+
+    # -----------------------------------------------------------------
+    # 5.2a: Per-gene Schoenfeld test (univariate Cox)
+    # -----------------------------------------------------------------
+    logger.info("")
+    logger.info("  --- 5.2a: Per-Gene PH Test ---")
+
+    per_gene_results = {}
+
+    for cohort_name in ['tcga', 'orien']:
+        expr = cohort_data[cohort_name]['expr']
+        surv = cohort_data[cohort_name]['surv']
+
+        # Align samples
+        common = sorted(set(expr.columns) & set(surv.index))
+        surv_aligned = surv.loc[common]
+
+        gene_results = []
+
+        for gene in consensus_genes:
+            symbol = ensg_to_symbol.get(gene, gene)
+
+            if gene not in expr.index:
+                logger.warning(f"    {gene} ({symbol}) not in {cohort_name.upper()} expression")
+                continue
+
+            # Build univariate Cox dataframe
+            gene_vals = expr.loc[gene, common].values.astype(float)
+            df = pd.DataFrame({
+                'gene_expr': gene_vals,
+                'time': surv_aligned['time'].values,
+                'event': surv_aligned['event'].values,
+            })
+            df = df[df['time'] > 0]
+
+            try:
+                cph = CoxPHFitter()
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    cph.fit(df, duration_col='time', event_col='event')
+
+                ph_test = proportional_hazard_test(cph, df, time_transform='rank')
+                test_stat = float(ph_test.summary['test_statistic'].iloc[0])
+                p_value = float(ph_test.summary['p'].iloc[0])
+
+                gene_results.append({
+                    'gene': gene,
+                    'symbol': symbol,
+                    'schoenfeld_stat': test_stat,
+                    'p_value': p_value,
+                    'n_samples': len(df),
+                    'n_events': int(df['event'].sum()),
+                    'coef': float(cph.summary['coef'].iloc[0]),
+                    'hr': float(cph.summary['exp(coef)'].iloc[0]),
+                    'ph_violated_005': p_value < 0.05,
+                })
+
+            except Exception as e:
+                gene_results.append({
+                    'gene': gene,
+                    'symbol': symbol,
+                    'error': str(e),
+                    'ph_violated_005': None,
+                })
+                logger.warning(f"    PH test failed for {symbol} in {cohort_name.upper()}: {e}")
+
+        gene_df = pd.DataFrame(gene_results)
+        gene_df.to_csv(out_dir / f"schoenfeld_per_gene_{cohort_name}.csv", index=False)
+        per_gene_results[cohort_name] = gene_df
+
+        n_violated = gene_df['ph_violated_005'].sum() if 'ph_violated_005' in gene_df else 0
+        n_tested = gene_df['ph_violated_005'].notna().sum()
+        logger.info(f"  {cohort_name.upper()}: {n_violated}/{n_tested} genes "
+                    f"with PH violation (p < 0.05)")
+
+    # -----------------------------------------------------------------
+    # 5.2b: Overall DeepSurv risk score PH test
+    # -----------------------------------------------------------------
+    logger.info("")
+    logger.info("  --- 5.2b: Overall Risk Score PH Test ---")
 
     risk_score_ph = {}
 
-    for cohort_name, surv in [('tcga', tcga_surv), ('orien', orien_surv)]:
-        # TCGA patients get risk scores from orien_to_tcga model
-        # ORIEN patients get risk scores from tcga_to_orien model
+    for cohort_name in ['tcga', 'orien']:
+        # Out-of-sample: TCGA patients tested with ORIEN-trained model
         if cohort_name == 'tcga':
             direction = 'orien_to_tcga'
         else:
@@ -231,10 +340,10 @@ def analysis_5_2(cox_genes: set, out_dir: Path):
 
         logger.info(f"  {cohort_name.upper()} (model: {direction})")
 
-        # Load model and compute risk scores
-        model = load_deepsurv_model(direction, n_features=len(consensus_genes))
-        expr, _ = load_cohort(cohort_name, str(DATA_DIR))
-        risk_scores = compute_risk_scores(model, expr, consensus_genes)
+        surv = cohort_data[cohort_name]['surv']
+
+        # Derive risk scores from saved IG attributions (sum across genes)
+        risk_scores = load_ig_risk_scores(direction)
 
         # Align with survival
         common = risk_scores.index.intersection(surv.index)
@@ -261,6 +370,7 @@ def analysis_5_2(cox_genes: set, out_dir: Path):
                 'n_samples': len(rs_df),
                 'n_events': int(rs_df['event'].sum()),
                 'model_direction': direction,
+                'ph_violated_005': p_value < 0.05,
             }
 
             logger.info(f"    Schoenfeld stat={test_stat:.3f}, p={p_value:.4f}")
@@ -270,13 +380,55 @@ def analysis_5_2(cox_genes: set, out_dir: Path):
             logger.warning(f"    PH test failed: {e}")
 
     risk_score_ph['note'] = (
-        'Risk scores computed from Phase 7 DeepSurv models '
-        '(out-of-sample: model trained on opposite cohort). '
-        'Single run, no multi-seed sensitivity.'
+        'Risk scores derived from Phase 7 IG attributions (sum across genes '
+        '≈ log-hazard by IG completeness axiom). Out-of-sample: model trained '
+        'on opposite cohort. Single run, no multi-seed sensitivity.'
     )
 
     with open(out_dir / "schoenfeld_risk_score.json", 'w') as f:
         json.dump(risk_score_ph, f, indent=2)
+
+    # -----------------------------------------------------------------
+    # Combined PH summary
+    # -----------------------------------------------------------------
+    logger.info("")
+    logger.info("  --- PH Summary ---")
+
+    ph_summary = {
+        'per_gene': {},
+        'risk_score': {},
+        'note': (
+            'All PH tests are descriptive. Gene set was selected using '
+            'these cohorts\' outcomes (post-selection inference). '
+            'PH violations at p<0.05 may reflect time-varying effects.'
+        ),
+    }
+
+    for cohort_name in ['tcga', 'orien']:
+        gene_df = per_gene_results[cohort_name]
+        n_tested = gene_df['ph_violated_005'].notna().sum()
+        n_violated = int(gene_df['ph_violated_005'].sum())
+        ph_summary['per_gene'][cohort_name] = {
+            'n_tested': int(n_tested),
+            'n_violated_005': n_violated,
+            'proportion_violated': float(n_violated / n_tested) if n_tested > 0 else 0,
+            'violated_genes': gene_df.loc[
+                gene_df['ph_violated_005'] == True, 'symbol'
+            ].tolist(),
+        }
+
+        if cohort_name in risk_score_ph and 'p_value' in risk_score_ph[cohort_name]:
+            ph_summary['risk_score'][cohort_name] = {
+                'p_value': risk_score_ph[cohort_name]['p_value'],
+                'violated': risk_score_ph[cohort_name]['ph_violated_005'],
+            }
+
+        logger.info(f"  {cohort_name.upper()}: "
+                    f"{n_violated}/{n_tested} genes with PH violation; "
+                    f"risk score p={risk_score_ph.get(cohort_name, {}).get('p_value', 'N/A')}")
+
+    with open(out_dir / "ph_summary.json", 'w') as f:
+        json.dump(ph_summary, f, indent=2)
 
 
 # =============================================================================
@@ -296,16 +448,16 @@ if __name__ == "__main__":
     )
     logging.getLogger().addHandler(file_handler)
 
-    logger.info("Phase 5a: Performance Comparison, Pathway Enrichment, PH Testing")
-    logger.info(f"Phase 3 results: {PHASE3_DIR}")
-    logger.info(f"Phase 4 results: {PHASE4_DIR}")
+    logger.info("Phase 5a: Performance Comparison and PH Testing (Corrected Pipeline)")
+    logger.info(f"Phase 7 results: {PHASE7_DIR}")
+    logger.info(f"Consensus genes: {CONSENSUS_PATH}")
     logger.info(f"Output: {RESULTS_DIR}")
 
     # Run Analysis 5.1
-    cox_genes, cox_symbols, bg_symbols = analysis_5_1(RESULTS_DIR / "analysis_5_1")
+    consensus_genes = analysis_5_1(RESULTS_DIR / "analysis_5_1")
 
     # Run Analysis 5.2
-    analysis_5_2(cox_genes, RESULTS_DIR / "analysis_5_2")
+    analysis_5_2(consensus_genes, RESULTS_DIR / "analysis_5_2")
 
     logger.info("")
     logger.info("=" * 70)
