@@ -140,37 +140,50 @@ def analysis_5_1(out_dir: Path) -> list:
 
     phase7 = load_phase7_summary()
 
+    # The summary JSON uses 'cox_percohort', 'cox_union', 'deepsurv_union'
+    # Cox per-cohort uses each cohort's own stable genes
+    # Cox union and DeepSurv union both use the full 25-gene union set
+
     perf = {
-        'cox': {
-            'tcga_to_orien': phase7['cox_validation']['tcga_to_orien']['test_ci'],
-            'orien_to_tcga': phase7['cox_validation']['orien_to_tcga']['test_ci'],
-            'mean_bidirectional': phase7['cox_validation']['mean_test_ci'],
+        'cox_percohort': {
+            'tcga_to_orien': phase7['cox_percohort']['tcga_to_orien']['test_ci'],
+            'orien_to_tcga': phase7['cox_percohort']['orien_to_tcga']['test_ci'],
+            'mean_bidirectional': phase7['cox_percohort']['mean_test_ci'],
         },
-        'deepsurv': {
-            'tcga_to_orien': phase7['deepsurv_validation']['tcga_to_orien']['test_ci'],
-            'orien_to_tcga': phase7['deepsurv_validation']['orien_to_tcga']['test_ci'],
-            'mean_bidirectional': phase7['deepsurv_validation']['mean_test_ci'],
+        'cox_union': {
+            'tcga_to_orien': phase7['cox_union']['tcga_to_orien']['test_ci'],
+            'orien_to_tcga': phase7['cox_union']['orien_to_tcga']['test_ci'],
+            'mean_bidirectional': phase7['cox_union']['mean_test_ci'],
         },
-        'cox_per_cohort_genes': {
-            'tcga_to_orien': phase7['cox_validation']['tcga_to_orien']['n_genes'],
-            'orien_to_tcga': phase7['cox_validation']['orien_to_tcga']['n_genes'],
+        'deepsurv_union': {
+            'tcga_to_orien': phase7['deepsurv_union']['tcga_to_orien']['test_ci'],
+            'orien_to_tcga': phase7['deepsurv_union']['orien_to_tcga']['test_ci'],
+            'mean_bidirectional': phase7['deepsurv_union']['mean_test_ci'],
         },
-        'union_genes': phase7['gene_sets']['union'],
+        'gene_sets': {
+            'tcga_stable': phase7['gene_sets']['tcga_stable'],
+            'orien_stable': phase7['gene_sets']['orien_stable'],
+            'union': phase7['gene_sets']['union'],
+            'overlap': phase7['gene_sets']['overlap'],
+        },
         'source': 'Phase 7 bidirectional validation (per-cohort stable genes, union set)',
         'note': (
             'Cox per-cohort models use only that cohort\'s stable genes '
-            '(TCGA: 12, ORIEN: 14). DeepSurv uses all 25 union genes. '
+            '(TCGA: 12, ORIEN: 14). Cox union and DeepSurv use all 25 union genes. '
             'C-indices are out-of-sample (train on one cohort, test on the other).'
         ),
     }
 
     logger.info(f"  Phase 7 C-indices (out-of-sample):")
-    logger.info(f"    TCGA→ORIEN Cox:      {perf['cox']['tcga_to_orien']:.4f}")
-    logger.info(f"    TCGA→ORIEN DeepSurv: {perf['deepsurv']['tcga_to_orien']:.4f}")
-    logger.info(f"    ORIEN→TCGA Cox:      {perf['cox']['orien_to_tcga']:.4f}")
-    logger.info(f"    ORIEN→TCGA DeepSurv: {perf['deepsurv']['orien_to_tcga']:.4f}")
-    logger.info(f"    Mean bidirectional Cox:     {perf['cox']['mean_bidirectional']:.4f}")
-    logger.info(f"    Mean bidirectional DeepSurv: {perf['deepsurv']['mean_bidirectional']:.4f}")
+    logger.info(f"    Cox per-cohort:  T→O={perf['cox_percohort']['tcga_to_orien']:.4f}, "
+                f"O→T={perf['cox_percohort']['orien_to_tcga']:.4f}, "
+                f"mean={perf['cox_percohort']['mean_bidirectional']:.4f}")
+    logger.info(f"    Cox union:       T→O={perf['cox_union']['tcga_to_orien']:.4f}, "
+                f"O→T={perf['cox_union']['orien_to_tcga']:.4f}, "
+                f"mean={perf['cox_union']['mean_bidirectional']:.4f}")
+    logger.info(f"    DeepSurv union:  T→O={perf['deepsurv_union']['tcga_to_orien']:.4f}, "
+                f"O→T={perf['deepsurv_union']['orien_to_tcga']:.4f}, "
+                f"mean={perf['deepsurv_union']['mean_bidirectional']:.4f}")
 
     with open(out_dir / "performance_summary.json", 'w') as f:
         json.dump(perf, f, indent=2)
@@ -186,14 +199,12 @@ def analysis_5_1(out_dir: Path) -> list:
     tcga_stable = phase7['gene_sets']['tcga_stable']
     orien_stable = phase7['gene_sets']['orien_stable']
     overlap_n = phase7['gene_sets']['overlap']
-    overlap_genes = phase7['gene_sets']['overlap_genes']
 
     gene_overlap = {
         'tcga_stable_n': tcga_stable,
         'orien_stable_n': orien_stable,
         'union_n': phase7['gene_sets']['union'],
         'overlap_n': overlap_n,
-        'overlap_genes': overlap_genes,
         'deepsurv_consensus_n': 0,
         'deepsurv_note': (
             'Corrected Phase 4 (randomized lasso, l1_ratio=1.0) produced 0 '
@@ -205,7 +216,7 @@ def analysis_5_1(out_dir: Path) -> list:
 
     logger.info(f"  TCGA stable genes: {tcga_stable}")
     logger.info(f"  ORIEN stable genes: {orien_stable}")
-    logger.info(f"  Overlap: {overlap_n} ({overlap_genes})")
+    logger.info(f"  Overlap: {overlap_n}")
     logger.info(f"  Union: {phase7['gene_sets']['union']}")
     logger.info(f"  DeepSurv consensus: 0 (expected)")
 
