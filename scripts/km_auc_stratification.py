@@ -435,13 +435,13 @@ def main():
             "times": dev_data["TCGA"]["time"],
             "events": dev_data["TCGA"]["event"],
             "scores": dev_scores["TCGA"],
-            "time_unit": "days",
+            "time_unit": "months",
         },
         "ORIEN": {
             "times": dev_data["ORIEN"]["time"],
             "events": dev_data["ORIEN"]["event"],
             "scores": dev_scores["ORIEN"],
-            "time_unit": "days",
+            "time_unit": "months",
         },
         "GSE41613": {
             "times": geo_data["GSE41613"]["time"],
