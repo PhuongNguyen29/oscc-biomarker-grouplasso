@@ -57,8 +57,8 @@ ANNOTATION_PATH = Path("data/raw/protein_coding_genes_annotation.csv")
 OUTPUT_DIR = Path("results/aim4_phase_a")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-# Ridge Cox config
-ALPHAS = np.logspace(-3, 3, 50)
+# Ridge Cox config — wider alpha range for binary pair features
+ALPHAS = np.logspace(0, 5, 50)  # binary features need stronger regularization
 L1_RATIO = 0.01  # near-pure ridge
 
 # GEO repeated CV config (for comparison with Aim 1)
@@ -161,14 +161,26 @@ def encode_pairs(X, gene_names):
 # =============================================================================
 # Model Fitting and Evaluation
 # =============================================================================
-def fit_ridge_cox(X_train, y_train, alphas=ALPHAS):
-    """Fit ridge Cox across alpha grid, return model."""
-    model = CoxnetSurvivalAnalysis(
-        l1_ratio=L1_RATIO, alphas=alphas,
-        normalize=False, tol=1e-7, max_iter=100000,
-    )
-    model.fit(X_train, y_train)
-    return model
+def fit_ridge_cox(X_train, y_train, alphas=None):
+    """Fit ridge Cox across alpha grid, with retry on numerical error."""
+    if alphas is None:
+        alphas = ALPHAS
+    
+    for attempt in range(5):
+        try:
+            model = CoxnetSurvivalAnalysis(
+                l1_ratio=L1_RATIO, alphas=alphas,
+                normalize=False, tol=1e-7, max_iter=100000,
+            )
+            model.fit(X_train, y_train)
+            return model
+        except ArithmeticError:
+            # Increase alpha (stronger regularization)
+            alphas = alphas * 2
+            logger.warning(f"    ArithmeticError, retrying with alpha range "
+                          f"[{alphas[0]:.1e}, {alphas[-1]:.1e}] (attempt {attempt+2})")
+    
+    raise RuntimeError("Ridge Cox fitting failed after 5 attempts")
 
 
 def select_best_alpha_cv(X, y_struct, events, n_folds=5, seed=SEED):
@@ -176,7 +188,7 @@ def select_best_alpha_cv(X, y_struct, events, n_folds=5, seed=SEED):
     skf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=seed)
     alpha_scores = {}
 
-    for train_idx, val_idx in skf.split(X, events):
+    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, events)):
         try:
             model = fit_ridge_cox(X[train_idx], y_struct[train_idx])
             for ai, alpha_val in enumerate(model.alphas_):
@@ -190,12 +202,13 @@ def select_best_alpha_cv(X, y_struct, events, n_folds=5, seed=SEED):
                     alpha_scores[ai].append(ci)
                 except Exception:
                     continue
-        except Exception:
+        except Exception as e:
+            logger.warning(f"    CV fold {fold_idx+1} failed: {e}")
             continue
 
-    best_alpha_idx, best_ci = 0, 0
+    best_alpha_idx, best_ci = 0, 0.5
     for ai, scores in alpha_scores.items():
-        if len(scores) >= 3:
+        if len(scores) >= 2:
             mean_ci = np.mean(scores)
             if mean_ci > best_ci:
                 best_ci = mean_ci
