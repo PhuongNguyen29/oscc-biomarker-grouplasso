@@ -301,11 +301,26 @@ def plot_km_roc_panel(cohort_name, times, events, risk_scores, time_horizon,
 
     kmf_low = KaplanMeierFitter()
     kmf_low.fit(times_display[low_risk], events[low_risk], label=f"Low Risk (n={n_low})")
-    kmf_low.plot_survival_function(ax=ax_km, color=COLOR_LOW, ci_alpha=0.15, linewidth=2)
 
     kmf_high = KaplanMeierFitter()
     kmf_high.fit(times_display[high_risk], events[high_risk], label=f"High Risk (n={n_high})")
-    kmf_high.plot_survival_function(ax=ax_km, color=COLOR_HIGH, ci_alpha=0.15, linewidth=2)
+
+    # Manual plotting to avoid pandas/matplotlib version conflicts
+    # Low risk
+    sf_low = kmf_low.survival_function_
+    ci_low = kmf_low.confidence_interval_survival_function_
+    ax_km.step(sf_low.index, sf_low.iloc[:, 0], where="post", color=COLOR_LOW,
+               linewidth=2, label=f"Low Risk (n={n_low})")
+    ax_km.fill_between(ci_low.index, ci_low.iloc[:, 0], ci_low.iloc[:, 1],
+                       step="post", alpha=0.15, color=COLOR_LOW)
+
+    # High risk
+    sf_high = kmf_high.survival_function_
+    ci_high = kmf_high.confidence_interval_survival_function_
+    ax_km.step(sf_high.index, sf_high.iloc[:, 0], where="post", color=COLOR_HIGH,
+               linewidth=2, label=f"High Risk (n={n_high})")
+    ax_km.fill_between(ci_high.index, ci_high.iloc[:, 0], ci_high.iloc[:, 1],
+                       step="post", alpha=0.15, color=COLOR_HIGH)
 
     # Log-rank test
     lr = logrank_test(
