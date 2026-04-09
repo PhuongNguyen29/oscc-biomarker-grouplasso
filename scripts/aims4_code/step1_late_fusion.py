@@ -68,8 +68,8 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 FIRST_STAGE_SEEDS = [42]
 PRIMARY_SEED = 42
-SECOND_STAGE_SEEDS = [42]
-N_FOLDS = 5
+SECOND_STAGE_SEEDS = list(range(42, 142))  # 100 seeds to match sweep
+N_FOLDS = 3
 
 INPUT_DIR = Path("results/chapter3/step0b")
 OUTPUT_DIR = Path("results/chapter3/step1_late_fusion")
