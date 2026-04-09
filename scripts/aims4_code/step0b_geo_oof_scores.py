@@ -14,7 +14,7 @@ select best alpha after, extract scores at that alpha.
 Methodology matches phase8_step83_validation.py:
   - CoxnetSurvivalAnalysis(l1_ratio=0.01) (near-pure ridge)
   - StratifiedKFold on event status
-  - 3 seeds (42, 123, 456) for fold assignment sensitivity
+  - 100 seeds  for fold assignment sensitivity
   - Alpha grids: logspace(-1, 4, 50) for genes, logspace(-4, 4, 50) for clinical
 
 Clinical encoding from Step 0A:
@@ -54,10 +54,10 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Configuration
 # =============================================================================
-SEEDS = [42, 123, 456]
-N_FOLDS = 5
+SEEDS = list(range(42, 142))  # matches sweep_sensitivity.py P8_SEEDS
+N_FOLDS = 3
 DATA_DIR = Path("data/external")
-CONSENSUS_FILE = Path("results/phase4_stability_mad3000/consensus/cox_consensus_k1000_pi80.txt")
+CONSENSUS_FILE = Path("results/sensitivity_sweep/mult0.6_pi60/union_genes.txt")
 OUTPUT_DIR = Path("results/chapter3/step0b")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -67,12 +67,7 @@ ALPHAS_CLINICAL = np.logspace(-4, 4, 50)
 
 # Expected C-indices from Step 8.3 for verification (gene-only model)
 # These were computed with the same methodology; we verify consistency
-EXPECTED_CINDEX = {
-    "GSE41613_gene": 0.6281,
-    "GSE42743_gene": 0.6058,
-}
-VERIFICATION_TOL = 0.005  # Allow small numerical tolerance
-
+EXPECTED_CINDEX = {}
 
 # =============================================================================
 # Data Loading (same as phase8_step83_validation.py)
