@@ -67,10 +67,10 @@ GEO_ALPHAS = np.logspace(-1, 4, 50)
 # GSE41613: months — 5 years = 60 months
 # GSE42743: days — 5 years = 1825 days
 TIME_HORIZONS = {
-    "TCGA": 1825,
-    "ORIEN": 1825,
-    "GSE41613": 60,
-    "GSE42743": 1825,
+    "TCGA": 60,       # months
+    "ORIEN": 60,      # months
+    "GSE41613": 60,   # months
+    "GSE42743": 1825, # days
 }
 
 # KM plot x-axis limits (in months for display)
