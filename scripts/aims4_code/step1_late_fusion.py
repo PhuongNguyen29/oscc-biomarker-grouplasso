@@ -66,9 +66,9 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Configuration
 # =============================================================================
-FIRST_STAGE_SEEDS = [42, 123, 456]
+FIRST_STAGE_SEEDS = 42
 PRIMARY_SEED = 42
-SECOND_STAGE_SEEDS = [42, 123, 456]
+SECOND_STAGE_SEEDS = 42
 N_FOLDS = 5
 
 INPUT_DIR = Path("results/chapter3/step0b")
