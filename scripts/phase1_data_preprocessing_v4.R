@@ -7,7 +7,7 @@
 #   Step 1.3: Clinical data alignment
 #
 # Key methodological corrections in v4:
-#   - SVA for TCGA: NO survival variables in model (unsupervised)
+#   - ComBat for TCGA: NO survival variables in model (unsupervised)
 #   - ComBat for ORIEN: NO survival variables in model (unsupervised)
 #   - No IQR filtering, no univariate Cox pre-screening
 #
@@ -22,7 +22,6 @@
 #
 # References:
 #   - TPM filtering: GTEx Consortium methodology; Chen et al. (2016) F1000Research
-#   - SVA: Leek & Storey (2007) PLoS Genetics; Leek et al. (2012) Bioinformatics
 #   - ComBat: Johnson et al. (2007) Biostatistics
 #
 # Author: [Your Name]
@@ -362,53 +361,12 @@ tcga_combat_result <- apply_combat_correction(
 )
 tcga_corrected <- tcga_combat_result$expr_corrected
 
-# -----------------------------------------------------------------------------
-# 3.4 Z-score Standardization
-# -----------------------------------------------------------------------------
+saveRDS(tcga_corrected,  file.path(OUTPUT_DIR, "tcga_postcombat_prez_v4.rds"))
+saveRDS(orien_corrected, file.path(OUTPUT_DIR, "orien_postcombat_prez_v4.rds"))
 
-cat("\n3.4 Z-score Standardization\n")
-cat("-" %>% rep(50) %>% paste(collapse = ""), "\n")
 
-#' Z-score standardization with outlier clipping
-#' 
-#' Standardize each gene to mean=0, SD=1 within each cohort.
-#' Clip outliers to ±3 SD to reduce influence of extreme values.
-#' 
-#' @param expr_df Expression data frame (genes x samples)
-#' @param clip_sd SD threshold for clipping (default: 3)
-#' @return Standardized expression data frame
-standardize_expression <- function(expr_df, clip_sd = 3) {
-  
-  expr_mat <- as.matrix(expr_df)
-  
-  # Z-score standardization (per gene)
-  gene_means <- rowMeans(expr_mat)
-  gene_sds <- rowSds(expr_mat)
-  
-  # Avoid division by zero for zero-variance genes
-  gene_sds[gene_sds == 0] <- 1
-  
-  expr_zscore <- (expr_mat - gene_means) / gene_sds
-  
-  # Clip outliers to ±clip_sd
-  n_clipped <- sum(abs(expr_zscore) > clip_sd, na.rm = TRUE)
-  pct_clipped <- n_clipped / length(expr_zscore) * 100
-  
-  expr_zscore[expr_zscore > clip_sd] <- clip_sd
-  expr_zscore[expr_zscore < -clip_sd] <- -clip_sd
-  
-  cat(sprintf("Clipped %.2f%% of values to ±%.0f SD\n", pct_clipped, clip_sd))
-  
-  return(as.data.frame(expr_zscore))
-}
-
-tcga_final <- standardize_expression(tcga_corrected, clip_sd = 3)
-orien_final <- standardize_expression(orien_corrected, clip_sd = 3)
-
-cat(sprintf("\nFinal preprocessed dimensions:\n"))
-cat(sprintf("  TCGA: %d genes x %d samples\n", nrow(tcga_final), ncol(tcga_final)))
-cat(sprintf("  ORIEN: %d genes x %d samples\n", nrow(orien_final), ncol(orien_final)))
-
+tcga_corrected  <- readRDS(file.path(OUTPUT_DIR, "tcga_postcombat_prez_v4.rds"))
+orien_corrected <- readRDS(file.path(OUTPUT_DIR, "orien_postcombat_prez_v4.rds"))
 # =============================================================================
 # 4. STEP 1.3: SAMPLE ALIGNMENT WITH SURVIVAL DATA
 # =============================================================================
@@ -418,16 +376,16 @@ cat("STEP 1.3: SAMPLE ALIGNMENT\n")
 cat("=" %>% rep(70) %>% paste(collapse = ""), "\n")
 
 # Align TCGA samples
-tcga_common_samples <- intersect(colnames(tcga_final), surv_tcga$sampleID)
-tcga_final_aligned <- tcga_final[, tcga_common_samples]
+tcga_common_samples <- intersect(colnames(tcga_corrected), surv_tcga$sampleID)
+tcga_corrected_aligned <- tcga_corrected[, tcga_common_samples]
 surv_tcga_aligned <- surv_tcga[match(tcga_common_samples, surv_tcga$sampleID), ]
 clinical_tcga_aligned <- clinical_tcga[match(tcga_common_samples, clinical_tcga$sampleID), ]
 
 cat(sprintf("TCGA samples aligned: %d\n", length(tcga_common_samples)))
 
 # Align ORIEN samples
-orien_common_samples <- intersect(colnames(orien_final), surv_orien$sampleID)
-orien_final_aligned <- orien_final[, orien_common_samples]
+orien_common_samples <- intersect(colnames(orien_corrected), surv_orien$sampleID)
+orien_corrected_aligned <- orien_corrected[, orien_common_samples]
 surv_orien_aligned <- surv_orien[match(orien_common_samples, surv_orien$sampleID), ]
 clinical_orien_aligned <- clinical_orien[match(orien_common_samples, clinical_orien$sampleID), ]
 
@@ -441,6 +399,7 @@ cat(sprintf("  TCGA: %d events / %d samples (%.1f%% event rate)\n",
 cat(sprintf("  ORIEN: %d events / %d samples (%.1f%% event rate)\n",
             sum(surv_orien_aligned$event), nrow(surv_orien_aligned),
             sum(surv_orien_aligned$event) / nrow(surv_orien_aligned) * 100))
+
 
 # =============================================================================
 # 5. QUALITY CONTROL PLOTS
@@ -627,6 +586,98 @@ anova_results <- rbind(anova_tcga, anova_orien)
 write.csv(anova_results, file.path(PLOT_DIR, "batch_anova_results.csv"), row.names = FALSE)
 cat(sprintf("\nANOVA results saved to: %s\n", file.path(PLOT_DIR, "batch_anova_results.csv")))
 
+# -----------------------------------------------------------------------------
+# 3.3 IQR Variability Filter  (post-ComBat, PRE z-score)
+# -----------------------------------------------------------------------------
+cat("\n3.3 IQR Variability Filter (post-ComBat, pre-z-score)\n")
+cat("-" %>% rep(50) %>% paste(collapse = ""), "\n")
+
+filter_genes_by_iqr <- function(expr_post_batch, cohort_name) {
+  m <- as.matrix(expr_post_batch)
+  v <- apply(m, 1, IQR, type = 7)
+  names(v) <- rownames(m)
+  med <- median(v)
+  retained <- names(v)[v >= med]
+  cat(sprintf("  %-5s: median IQR = %.4f | retained %d / %d genes\n",
+              cohort_name, med, length(retained), length(v)))
+  list(retained = retained, iqr = v, median = med)
+}
+
+tcga_iqr  <- filter_genes_by_iqr(tcga_corrected,  "TCGA")
+orien_iqr <- filter_genes_by_iqr(orien_corrected, "ORIEN")
+
+# Intersect, then impose a single canonical row order for both cohorts
+iqr_common_genes <- intersect(tcga_iqr$retained, orien_iqr$retained)
+iqr_common_genes <- rownames(tcga_corrected)[rownames(tcga_corrected) %in% iqr_common_genes]
+
+cat(sprintf("\n  TCGA above-median : %d\n", length(tcga_iqr$retained)))
+cat(sprintf("  ORIEN above-median: %d\n", length(orien_iqr$retained)))
+cat(sprintf("  IQR intersection  : %d genes\n", length(iqr_common_genes)))
+
+# Subset both cohorts to the IQR intersection (identical row order)
+tcga_iqr_filtered  <- tcga_corrected[iqr_common_genes, ]
+orien_iqr_filtered <- orien_corrected[iqr_common_genes, ]
+stopifnot(identical(rownames(tcga_iqr_filtered), rownames(orien_iqr_filtered)))
+
+iqr_table <- data.frame(
+  gene      = names(tcga_iqr$iqr),
+  iqr_tcga  = as.numeric(tcga_iqr$iqr),
+  iqr_orien = as.numeric(orien_iqr$iqr[names(tcga_iqr$iqr)]),
+  retained  = names(tcga_iqr$iqr) %in% iqr_common_genes)
+write.csv(iqr_table, file.path(OUTPUT_DIR, "iqr_filtered_v4_prez", "iqr_filter_values_v4.csv"), row.names = FALSE)
+
+# Keep the path tune_deepsurv.py already reads from, so Phase 2 works unchanged
+dir.create(file.path(OUTPUT_DIR, "iqr_filtered_v4_prez"), recursive = TRUE, showWarnings = FALSE)
+writeLines(iqr_common_genes,
+           file.path(OUTPUT_DIR, "iqr_filtered_v4_prez", "retained_genes.txt"))
+
+# -----------------------------------------------------------------------------
+# 3.4 Z-score Standardization
+# -----------------------------------------------------------------------------
+
+cat("\n3.4 Z-score Standardization\n")
+cat("-" %>% rep(50) %>% paste(collapse = ""), "\n")
+
+#' Z-score standardization with outlier clipping
+#' 
+#' Standardize each gene to mean=0, SD=1 within each cohort.
+#' Clip outliers to ±3 SD to reduce influence of extreme values.
+#' 
+#' @param expr_df Expression data frame (genes x samples)
+#' @param clip_sd SD threshold for clipping (default: 3)
+#' @return Standardized expression data frame
+standardize_expression <- function(expr_df, clip_sd = 3) {
+  
+  expr_mat <- as.matrix(expr_df)
+  
+  # Z-score standardization (per gene)
+  gene_means <- rowMeans(expr_mat)
+  gene_sds <- rowSds(expr_mat)
+  
+  # Avoid division by zero for zero-variance genes
+  gene_sds[gene_sds == 0] <- 1
+  
+  expr_zscore <- (expr_mat - gene_means) / gene_sds
+  
+  # Clip outliers to ±clip_sd
+  n_clipped <- sum(abs(expr_zscore) > clip_sd, na.rm = TRUE)
+  pct_clipped <- n_clipped / length(expr_zscore) * 100
+  
+  expr_zscore[expr_zscore > clip_sd] <- clip_sd
+  expr_zscore[expr_zscore < -clip_sd] <- -clip_sd
+  
+  cat(sprintf("Clipped %.2f%% of values to ±%.0f SD\n", pct_clipped, clip_sd))
+  
+  return(as.data.frame(expr_zscore))
+}
+
+tcga_final <- standardize_expression(tcga_iqr_filtered, clip_sd = 3)
+orien_final <- standardize_expression(orien_iqr_filtered, clip_sd = 3)
+
+cat(sprintf("\nFinal preprocessed dimensions:\n"))
+cat(sprintf("  TCGA: %d genes x %d samples\n", nrow(tcga_final), ncol(tcga_final)))
+cat(sprintf("  ORIEN: %d genes x %d samples\n", nrow(orien_final), ncol(orien_final)))
+
 # =============================================================================
 # 6. SAVE OUTPUTS
 # =============================================================================
@@ -636,13 +687,13 @@ cat("SAVING OUTPUTS\n")
 cat("=" %>% rep(70) %>% paste(collapse = ""), "\n")
 
 # Save preprocessed expression data
-write.csv(tcga_final_aligned, 
-          file.path(OUTPUT_DIR, "tcga_preprocessed_v4.csv"))
+write.csv(tcga_final, 
+          file.path(OUTPUT_DIR, "tcga_corrected_preprocessed_v4.csv"))
 write.csv(orien_final_aligned, 
-          file.path(OUTPUT_DIR, "orien_preprocessed_v4.csv"))
+          file.path(OUTPUT_DIR, "orien_corrected_preprocessed_v4.csv"))
 
 # Save aligned survival data
-write.csv(surv_tcga_aligned, 
+write.csv(surv_tcga, 
           file.path(OUTPUT_DIR, "surv_tcga_aligned_v4.csv"))
 write.csv(surv_orien_aligned, 
           file.path(OUTPUT_DIR, "surv_orien_aligned_v4.csv"))
@@ -697,15 +748,6 @@ metadata <- list(
 
 saveRDS(metadata, file.path(OUTPUT_DIR, "preprocessing_metadata_v4.rds"))
 
-cat("\nOutput files saved:\n")
-cat(sprintf("  %s/tcga_preprocessed_v4.csv\n", OUTPUT_DIR))
-cat(sprintf("  %s/orien_preprocessed_v4.csv\n", OUTPUT_DIR))
-cat(sprintf("  %s/surv_tcga_aligned_v4.csv\n", OUTPUT_DIR))
-cat(sprintf("  %s/surv_orien_aligned_v4.csv\n", OUTPUT_DIR))
-cat(sprintf("  %s/clinical_tcga_aligned_v4.csv\n", OUTPUT_DIR))
-cat(sprintf("  %s/clinical_orien_aligned_v4.csv\n", OUTPUT_DIR))
-cat(sprintf("  %s/common_genes_v4.txt\n", OUTPUT_DIR))
-cat(sprintf("  %s/preprocessing_metadata_v4.rds\n", OUTPUT_DIR))
 
 # =============================================================================
 # 7. FINAL SUMMARY
