@@ -693,7 +693,7 @@ write.csv(orien_final,
           file.path(OUTPUT_DIR, "orien_corrected_preprocessed_v4.csv"))
 
 # Save aligned survival data
-write.csv(surv_tcga, 
+write.csv(surv_tcga_aligned, 
           file.path(OUTPUT_DIR, "surv_tcga_aligned_v4.csv"))
 write.csv(surv_orien_aligned, 
           file.path(OUTPUT_DIR, "surv_orien_aligned_v4.csv"))
