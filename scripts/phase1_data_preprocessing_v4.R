@@ -689,7 +689,7 @@ cat("=" %>% rep(70) %>% paste(collapse = ""), "\n")
 # Save preprocessed expression data
 write.csv(tcga_final, 
           file.path(OUTPUT_DIR, "tcga_corrected_preprocessed_v4.csv"))
-write.csv(orien_final_aligned, 
+write.csv(orien_final, 
           file.path(OUTPUT_DIR, "orien_corrected_preprocessed_v4.csv"))
 
 # Save aligned survival data
