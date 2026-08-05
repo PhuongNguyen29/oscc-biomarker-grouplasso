@@ -71,6 +71,7 @@ Usage:
 import argparse
 import json
 import logging
+import warnings
 from datetime import datetime
 from pathlib import Path
 
@@ -93,8 +94,8 @@ logging.getLogger('src.data.data_loader').setLevel(logging.WARNING)
 # Configuration
 # =============================================================================
 
-B_FITS = 50                  # total fits = N_PAIRS * 2
-N_PAIRS = B_FITS // 2        # 25 complementary pairs
+N_PAIRS = 50                 # complementary pairs; total fits = N_PAIRS * 2 = 100
+B_FITS = N_PAIRS * 2         # M&B suggest B ~ 100; 25 pairs was undersampled
 SUBSAMPLE_FRACTION = 0.50    # required by CPSS; NOT a tunable
 RANDOM_SEED = 42
 DATA_DIR = "data/processed"
@@ -111,6 +112,17 @@ PRIMARY_BOUND = "mb"
 
 # Randomized lasso weakness: W_j ~ Uniform(WEAKNESS_ALPHA, 1.0). Frozen.
 WEAKNESS_ALPHA = 0.5
+
+# Coordinate descent iteration cap. Raising this is worth trying but must not be
+# assumed to fix non-convergence: at 4,835 features with ~170 TCGA samples per
+# half, the problem may simply be too ill-conditioned at small alpha.
+MAX_ITER = 100000
+
+# A pair is USABLE only if BOTH halves converged. CPSS is defined over
+# complementary pairs, so a half cannot be dropped on its own -- doing so would
+# leave an orphan half and break the design the error bound assumes.
+# A cell is ESTIMABLE only if at least this fraction of pairs is usable.
+MIN_USABLE_PAIR_FRACTION = 1.0
 
 ALPHA_MULTIPLIERS = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
@@ -249,7 +261,25 @@ def fit_randomized_lasso_cox(X, y_event, y_time, gene_names,
 
     Randomization (M&B 2010 Section 3.1): draw W_j ~ Uniform(weakness, 1),
     scale column j by 1/W_j, so the effective penalty on gene j is alpha*W_j.
-    Unchanged from the original script.
+
+    CONVERGENCE HANDLING
+    --------------------
+    Coordinate descent emits a ConvergenceWarning and returns a partially
+    optimised path when it hits max_iter. That is NOT an exception, so a naive
+    implementation records the result as a valid selection. Unconverged paths
+    have not finished shrinking, so they are typically LESS sparse than the
+    converged solution -- which inflates q, and E(V) scales with q^2.
+
+    This function therefore returns an explicit `converged` flag. Callers must
+    not treat an unconverged fit as a selection.
+
+    ArithmeticError is recorded as a failure and NOT retried at a larger alpha.
+    Retrying with a doubled alpha would put that fit at a different penalty from
+    the rest of the cell, so q would mix fits from different alphas.
+
+    Returns:
+        selected, signed, n_nonzero, status
+        status is one of: "ok", "nonconverged", "arithmetic_error"
     """
     n_features = X.shape[1]
     weights = rng.uniform(weakness, 1.0, size=n_features)
@@ -260,24 +290,30 @@ def fit_randomized_lasso_cox(X, y_event, y_time, gene_names,
         dtype=[('event', bool), ('time', float)]
     )
 
-    current_alpha = alpha
-    for attempt in range(5):
+    model = CoxnetSurvivalAnalysis(
+        l1_ratio=l1_ratio,
+        alphas=[alpha],
+        normalize=False,
+        tol=1e-7,
+        max_iter=MAX_ITER,
+    )
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
         try:
-            model = CoxnetSurvivalAnalysis(
-                l1_ratio=l1_ratio,
-                alphas=[current_alpha],
-                normalize=False,
-                tol=1e-7,
-                max_iter=100000,
-            )
             model.fit(X_scaled, y_struct)
-            break
         except ArithmeticError:
-            current_alpha *= 2
-            if attempt == 4:
-                logger.warning(f"    Lasso fit failed after 5 attempts "
-                               f"(alpha={current_alpha:.6f})")
-                return [], {}, 0
+            return [], {}, 0, "arithmetic_error"
+
+    # Match on category name AND message text: sksurv's warning class has moved
+    # between versions, so do not rely on importing a specific exception class.
+    nonconverged = any(
+        w.category.__name__ == "ConvergenceWarning"
+        or "terminated early" in str(w.message).lower()
+        for w in caught
+    )
+    if nonconverged:
+        return [], {}, 0, "nonconverged"
 
     coefs_scaled = model.coef_[:, 0]
     coefs_original = coefs_scaled / weights
@@ -286,7 +322,7 @@ def fit_randomized_lasso_cox(X, y_event, y_time, gene_names,
     selected = [gene_names[j] for j in range(n_features) if nonzero[j]]
     signed = dict(zip(gene_names, coefs_original))
 
-    return selected, signed, int(nonzero.sum())
+    return selected, signed, int(nonzero.sum()), "ok"
 
 
 # =============================================================================
@@ -328,45 +364,89 @@ def run_stability_for_cohort(cohort, X, y_event, y_time, gene_names,
         # Reset weight RNG per multiplier so cells are comparable
         weight_rng = np.random.RandomState(RANDOM_SEED + 1000)
 
-        selections, signed_coefs, n_nonzero = [], [], []
-        fit_labels = []
+        # Fit BOTH halves of each pair, then keep the pair only if both
+        # converged. A half cannot be dropped alone -- CPSS is defined over
+        # complementary pairs, and an orphan half breaks the design.
+        usable_selections, usable_signed, usable_nnz, usable_labels = [], [], [], []
+        n_pairs_dropped = 0
+        status_counts = {"ok": 0, "nonconverged": 0, "arithmetic_error": 0}
 
         for k, pr in enumerate(pairs):
+            pair_out = []
             for half in ('A', 'B'):
-                sel, sgn, nnz = fit_randomized_lasso_cox(
+                sel, sgn, nnz, status = fit_randomized_lasso_cox(
                     X[pr[half]], y_event[pr[half]], y_time[pr[half]],
                     gene_names, current_alpha, l1_ratio,
                     WEAKNESS_ALPHA, weight_rng,
                 )
-                selections.append(sel)
-                signed_coefs.append(sgn)
-                n_nonzero.append(nnz)
-                fit_labels.append(f"pair{k+1:02d}{half}")
+                status_counts[status] += 1
+                pair_out.append((sel, sgn, nnz, status, f"pair{k+1:02d}{half}"))
 
-        q = float(np.mean(n_nonzero))
+            if all(o[3] == "ok" for o in pair_out):
+                for sel, sgn, nnz, _, lbl in pair_out:
+                    usable_selections.append(sel)
+                    usable_signed.append(sgn)
+                    usable_nnz.append(nnz)
+                    usable_labels.append(lbl)
+            else:
+                n_pairs_dropped += 1
+
+        n_usable_pairs = N_PAIRS - n_pairs_dropped
+        usable_fraction = n_usable_pairs / N_PAIRS
+        estimable = usable_fraction >= MIN_USABLE_PAIR_FRACTION
+
+        logger.info(f"    fits: ok={status_counts['ok']}, "
+                    f"nonconverged={status_counts['nonconverged']}, "
+                    f"arith_error={status_counts['arithmetic_error']}")
+        logger.info(f"    usable pairs: {n_usable_pairs}/{N_PAIRS} "
+                    f"({usable_fraction:.0%}) -> "
+                    f"{'ESTIMABLE' if estimable else 'NON-ESTIMABLE'}")
+
+        if not estimable:
+            logger.warning(f"    Cell mult={mult} marked NON-ESTIMABLE. "
+                           f"q and E(V) are not reported for this multiplier.")
+            all_alpha_results[mult] = {
+                'alpha': current_alpha,
+                'estimable': False,
+                'sel_probs': pd.Series(0.0, index=gene_names),
+                'q': None,
+                'n_usable_pairs': n_usable_pairs,
+                'status_counts': status_counts,
+            }
+            continue
+
+        q = float(np.mean(usable_nnz))
         logger.info(f"    q (mean selected per fit): {q:.1f} "
-                    f"+/- {np.std(n_nonzero):.1f}  "
-                    f"[{min(n_nonzero)}, {max(n_nonzero)}]")
+                    f"+/- {np.std(usable_nnz):.1f}  "
+                    f"[{min(usable_nnz)}, {max(usable_nnz)}]")
 
-        # Selection probability = fraction of ALL fits selecting the gene
+        # Selection probability over usable fits only
         counts = pd.Series(0.0, index=gene_names)
-        for sel in selections:
+        for sel in usable_selections:
             counts[sel] += 1
-        sel_probs = counts / len(selections)
+        sel_probs = counts / len(usable_selections)
 
         for pi in PI_THRESHOLDS:
             n_stable = int((sel_probs >= pi).sum())
-            b = compute_bounds(q, pi, len(gene_names), N_PAIRS)
+            b = compute_bounds(q, pi, len(gene_names), n_usable_pairs)
             ss = "n/a" if b['shah_samworth'] is None else f"{b['shah_samworth']:.2f}"
             logger.info(f"    pi>={pi:.2f}: {n_stable:>4} stable | "
                         f"E(V) M&B={b['mb']:.2f}, SS={ss}")
 
+        selections = usable_selections
+        signed_coefs = usable_signed
+        n_nonzero = usable_nnz
+        fit_labels = usable_labels
+
         all_alpha_results[mult] = {
             'alpha': current_alpha,
+            'estimable': True,
             'sel_probs': sel_probs,
             'q': q,
             'std_nonzero': float(np.std(n_nonzero)),
             'n_nonzero_per_fit': n_nonzero,
+            'n_usable_pairs': n_usable_pairs,
+            'status_counts': status_counts,
         }
 
         # Persist
@@ -399,7 +479,8 @@ def select_operating_point(grid, ev_target, bound_key):
     """
     admissible = [
         c for c in grid
-        if c[f'ev_tcga_{bound_key}'] is not None
+        if c.get('estimable')
+        and c[f'ev_tcga_{bound_key}'] is not None
         and c[f'ev_orien_{bound_key}'] is not None
         and c[f'ev_tcga_{bound_key}'] <= ev_target
         and c[f'ev_orien_{bound_key}'] <= ev_target
@@ -520,10 +601,37 @@ if __name__ == "__main__":
                 f"{'EV_T':>8} {'EV_O':>8} {'nT':>5} {'nO':>5} {'ovlp':>5}")
 
     for mult in ALPHA_MULTIPLIERS:
-        tp = all_results['tcga'][mult]['sel_probs']
-        op = all_results['orien'][mult]['sel_probs']
-        qt = all_results['tcga'][mult]['q']
-        qo = all_results['orien'][mult]['q']
+        t_res = all_results['tcga'][mult]
+        o_res = all_results['orien'][mult]
+
+        # A cell is admissible only if BOTH cohorts are estimable at this
+        # multiplier. Non-estimable cells are recorded with estimable=False and
+        # are excluded from the selection rule -- they are not treated as
+        # high-q cells, because their q is not defined.
+        if not (t_res.get('estimable') and o_res.get('estimable')):
+            logger.info(f"{mult:>5}   ---  NON-ESTIMABLE "
+                        f"(TCGA usable pairs={t_res.get('n_usable_pairs')}, "
+                        f"ORIEN={o_res.get('n_usable_pairs')})")
+            for pi in PI_THRESHOLDS:
+                grid.append({
+                    'mult': mult, 'pi': pi, 'estimable': False,
+                    'q_tcga': None, 'q_orien': None,
+                    'ev_tcga_mb': None, 'ev_orien_mb': None,
+                    'ev_tcga_shah_samworth': None,
+                    'ev_orien_shah_samworth': None,
+                    'n_tcga_stable': None, 'n_orien_stable': None,
+                    'n_overlap': None,
+                    'tcga_stable_genes': [], 'orien_stable_genes': [],
+                    'overlap_genes': [], 'union_genes': [],
+                    'n_usable_pairs_tcga': t_res.get('n_usable_pairs'),
+                    'n_usable_pairs_orien': o_res.get('n_usable_pairs'),
+                })
+            continue
+
+        tp = t_res['sel_probs']
+        op = o_res['sel_probs']
+        qt = t_res['q']
+        qo = o_res['q']
 
         for pi in PI_THRESHOLDS:
             st = set(tp.index[tp >= pi])
@@ -534,8 +642,10 @@ if __name__ == "__main__":
             bo = compute_bounds(qo, pi, p, N_PAIRS)
 
             cell = {
-                'mult': mult, 'pi': pi,
+                'mult': mult, 'pi': pi, 'estimable': True,
                 'q_tcga': qt, 'q_orien': qo,
+                'n_usable_pairs_tcga': t_res['n_usable_pairs'],
+                'n_usable_pairs_orien': o_res['n_usable_pairs'],
                 'ev_tcga_mb': bt['mb'], 'ev_orien_mb': bo['mb'],
                 'ev_tcga_shah_samworth': bt['shah_samworth'],
                 'ev_orien_shah_samworth': bo['shah_samworth'],
@@ -621,6 +731,8 @@ if __name__ == "__main__":
             'alpha_multipliers': ALPHA_MULTIPLIERS,
             'pi_thresholds': PI_THRESHOLDS,
             'random_seed': RANDOM_SEED,
+            'max_iter': MAX_ITER,
+            'min_usable_pair_fraction': MIN_USABLE_PAIR_FRACTION,
         },
         'grid': grid,
         'selected_cell': selected,
