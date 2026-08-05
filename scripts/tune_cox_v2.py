@@ -99,7 +99,7 @@ DEFAULT_RESULTS_ROOT = "results/phase2_tuning"
 DEFAULT_N_ALPHAS = 100
 
 # l1_ratio search space (discrete grid). 0.1 = mostly ridge, 1.0 = pure lasso.
-L1_RATIO_CHOICES = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+L1_RATIO_CHOICES = [1.0]
 
 MAX_ITER = 100000
 TOL = 1e-7
