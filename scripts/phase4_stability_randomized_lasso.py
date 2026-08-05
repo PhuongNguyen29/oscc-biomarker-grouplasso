@@ -96,10 +96,8 @@ PHASE2_COX_PARAMS = {
 
 # Randomized lasso config (Meinshausen & Bühlmann 2010, Section 3.1)
 WEAKNESS_ALPHA = 0.5  # W_j ~ Uniform(WEAKNESS_ALPHA, 1)
-# This means penalty weights are drawn from Uniform(0.5, 1.0)
 
-# Alpha scan: also test alphas that select more/fewer genes
-# to find the operating point with best consensus
+# Alpha scan: also test alphas that select more/fewer genes to find the operating point with best consensus
 ALPHA_MULTIPLIERS = [0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0]
 
 
