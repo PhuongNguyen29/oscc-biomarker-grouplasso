@@ -599,9 +599,7 @@ if __name__ == "__main__":
     logger.info("Phase 4: CPSS Randomized Lasso Stability Selection")
     logger.info(f"Results: {results_dir}")
     logger.info(f"EV_TARGET={EV_TARGET}, PRIMARY_BOUND={PRIMARY_BOUND}")
-    if args.allow_stale_phase2:
-        logger.warning("RUNNING WITH STALE PHASE 2 ALPHAS — diagnostic only")
-
+    
     # --- Load ---------------------------------------------------------------
     tcga_expr, tcga_surv = load_cohort('tcga', DATA_DIR)
     orien_expr, orien_surv = load_cohort('orien', DATA_DIR)
