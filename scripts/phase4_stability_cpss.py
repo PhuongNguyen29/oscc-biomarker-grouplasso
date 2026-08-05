@@ -126,14 +126,92 @@ MIN_USABLE_PAIR_FRACTION = 1.0
 
 ALPHA_MULTIPLIERS = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
-# Phase 2 anchoring alphas. MUST be re-derived from the corrected Phase 2 run
-# on the 4,835-gene universe before this script is run for the record.
-# Values below are from the OLD 4,448-gene tuning and are placeholders.
-PHASE2_COX_PARAMS = {
-    'tcga':  {'l1_ratio': 1.0, 'alpha': 0.10217330634724603},
-    'orien': {'l1_ratio': 1.0, 'alpha': 0.06833270705221954},
-}
-PHASE2_PARAMS_ARE_CORRECTED = False   # set True once re-derived; asserted below
+# Phase 2 anchoring alphas are NOT hard-coded. They are read from the Phase 2
+# output JSON via --phase2-tcga / --phase2-orien, and validated against the
+# filter directory used here. A hard-coded value plus a manual "is corrected"
+# flag can be internally consistent and still wrong; reading the file lets the
+# script check provenance instead of trusting an attestation.
+#
+# Randomized lasso requires l1_ratio = 1.0 (M&B 2010 Sec 3.1). Ridge-like
+# penalties give dense rankings and are the defect this pipeline corrects, so a
+# Phase 2 file tuned at any other l1_ratio is rejected rather than coerced.
+REQUIRED_L1_RATIO = 1.0
+
+
+# =============================================================================
+# Phase 2 anchor loading
+# =============================================================================
+
+def load_phase2_anchor(path, cohort, filter_dir, n_genes):
+    """
+    Load the Phase 2 anchoring alpha for one cohort and validate its provenance.
+
+    Validates, and raises rather than warns on failure:
+      - l1_ratio == REQUIRED_L1_RATIO (randomized lasso needs pure lasso)
+      - Phase 2 used the same --filter-dir as this run
+      - Phase 2 saw the same number of genes
+      - the alpha is present and positive
+
+    The gene-count and filter-dir checks are the point of reading from file:
+    they catch an anchor tuned on a different universe, which is invisible when
+    the number is pasted in by hand.
+
+    Returns (params_dict, provenance_dict).
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Phase 2 results not found for {cohort}: {path}. "
+            f"Run tune_cox_v2.py and pass --phase2-{cohort} <cohort>_best_params.json"
+        )
+    with open(path) as f:
+        p2 = json.load(f)
+
+    l1 = p2.get('best_l1_ratio')
+    alpha = p2.get('actual_path_alpha')
+
+    if alpha is None:
+        raise ValueError(
+            f"{cohort}: actual_path_alpha is null in {path}. The Phase 2 "
+            f"full-data refit failed; rerun tuning before Phase 4."
+        )
+    if l1 != REQUIRED_L1_RATIO:
+        raise ValueError(
+            f"{cohort}: Phase 2 was tuned at l1_ratio={l1}, but randomized "
+            f"lasso requires {REQUIRED_L1_RATIO} (M&B 2010 Sec 3.1). Alpha does "
+            f"not transfer across l1_ratio -- its scale depends on the L1/L2 "
+            f"mix. Rerun tune_cox_v2.py with L1_RATIO_CHOICES = [1.0]."
+        )
+    if alpha <= 0:
+        raise ValueError(f"{cohort}: non-positive alpha {alpha} in {path}")
+
+    p2_filter = p2.get('filter_dir')
+    if p2_filter is not None and p2_filter != filter_dir:
+        raise ValueError(
+            f"{cohort}: Phase 2 was tuned on filter_dir='{p2_filter}' but this "
+            f"run uses '{filter_dir}'. The anchor scale is specific to the gene "
+            f"universe it was derived on."
+        )
+
+    p2_ngenes = p2.get('n_genes')
+    if p2_ngenes is not None and p2_ngenes != n_genes:
+        raise ValueError(
+            f"{cohort}: Phase 2 saw {p2_ngenes} genes, this run has {n_genes}. "
+            f"Anchor and universe are out of step."
+        )
+
+    provenance = {
+        'source_file': str(path),
+        'best_l1_ratio': l1,
+        'actual_path_alpha': alpha,
+        'recommended_alpha': p2.get('recommended_alpha'),
+        'phase2_filter_dir': p2_filter,
+        'phase2_n_genes': p2_ngenes,
+        'phase2_n_nonzero_at_alpha': p2.get('n_nonzero_at_best'),
+        'phase2_all_folds_converged': p2.get('all_folds_converged'),
+        'phase2_cindex_biased': p2.get('cindex_is_optimistically_biased'),
+    }
+    return {'l1_ratio': l1, 'alpha': alpha}, provenance
 
 
 # =============================================================================
@@ -502,17 +580,11 @@ if __name__ == "__main__":
     ap.add_argument('--cohort', type=str, default='both',
                     choices=['tcga', 'orien', 'both'])
     ap.add_argument('--results-dir', type=str, default=None)
-    ap.add_argument('--allow-stale-phase2', action='store_true',
-                    help="Run with the old 4,448-gene Phase 2 alphas (diagnostic only)")
+    ap.add_argument('--phase2-tcga', required=True,
+                    help="Path to TCGA <cohort>_best_params.json from tune_cox_v2.py")
+    ap.add_argument('--phase2-orien', required=True,
+                    help="Path to ORIEN <cohort>_best_params.json from tune_cox_v2.py")
     args = ap.parse_args()
-
-    if not PHASE2_PARAMS_ARE_CORRECTED and not args.allow_stale_phase2:
-        raise RuntimeError(
-            "PHASE2_COX_PARAMS are from the old 4,448-gene tuning. Re-derive them "
-            "from the corrected Phase 2 run on the 4,835-gene universe and set "
-            "PHASE2_PARAMS_ARE_CORRECTED = True, or pass --allow-stale-phase2 "
-            "for a diagnostic run whose output must not be used for the record."
-        )
 
     np.random.seed(RANDOM_SEED)
     results_dir = Path(args.results_dir) if args.results_dir else Path(RESULTS_BASE)
@@ -556,6 +628,17 @@ if __name__ == "__main__":
     gene_names = retained_genes
     p = len(gene_names)
 
+    # ---- Phase 2 anchors (validated, not hard-coded) -----------------------
+    phase2_paths = {'tcga': args.phase2_tcga, 'orien': args.phase2_orien}
+    phase2_params, phase2_provenance = {}, {}
+    for c in ('tcga', 'orien'):
+        phase2_params[c], phase2_provenance[c] = load_phase2_anchor(
+            phase2_paths[c], c, args.filter_dir, p)
+        logger.info(f"  Phase 2 anchor {c.upper()}: "
+                    f"alpha={phase2_params[c]['alpha']:.8f}, "
+                    f"l1_ratio={phase2_params[c]['l1_ratio']} "
+                    f"({phase2_provenance[c]['source_file']})")
+
     cohort_data = {
         'tcga': (tcga_expr.loc[retained_genes].values.T.astype(np.float32),
                  tcga_surv['event'].values.astype(np.float32),
@@ -572,8 +655,8 @@ if __name__ == "__main__":
         X, ev, tm = cohort_data[c]
         all_results[c] = run_stability_for_cohort(
             c, X, ev, tm, gene_names,
-            alpha=PHASE2_COX_PARAMS[c]['alpha'],
-            l1_ratio=PHASE2_COX_PARAMS[c]['l1_ratio'],
+            alpha=phase2_params[c]['alpha'],
+            l1_ratio=phase2_params[c]['l1_ratio'],
             results_dir=results_dir,
         )
 
@@ -719,8 +802,8 @@ if __name__ == "__main__":
         'ev_target': EV_TARGET,
         'primary_bound': PRIMARY_BOUND,
         'shah_samworth_implemented': shah_samworth_bound(1, 0.8, 100, 25) is not None,
-        'phase2_params': PHASE2_COX_PARAMS,
-        'phase2_params_are_corrected': PHASE2_PARAMS_ARE_CORRECTED,
+        'phase2_params': phase2_params,
+        'phase2_provenance': phase2_provenance,
         'iqr_filter': iqr_metadata,
         'n_genes': p,
         'config': {
