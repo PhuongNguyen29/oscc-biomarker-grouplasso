@@ -397,6 +397,12 @@ cat("\n", rep("=", 70), "\n", sep = "")
 cat("Processing GSE42743\n")
 cat(rep("=", 70), "\n", sep = "")
 
+# The original RMA script saved names as GSM#######_MDA-HNS-###; the corrected
+# one strips to bare GSM IDs. Handle both so this script works with either.
+colnames(expr42743) <- sub("_.*", "", colnames(expr42743))
+stopifnot(all(grepl("^GSM[0-9]+$", colnames(expr42743))))
+stopifnot(!any(duplicated(colnames(expr42743))))
+
 # The RMA matrix column order comes from list.files(); pData is in GEO order.
 # Align BY NAME before any positional operation. Applying a pData-derived mask
 # positionally to a differently-ordered matrix silently selects the wrong

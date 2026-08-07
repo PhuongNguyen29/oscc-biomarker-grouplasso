@@ -46,8 +46,9 @@ library(affy)
 # Configuration
 # ==============================================================================
 
-TAR_FILE <- "GSE42743/GSE42743_RAW.tar"
-CEL_DIR  <- "GSE42743/CEL"
+GSE_DIR  <- "~/hpchome/oscc-biomarker-elasticdeepsurv/GSE42743"
+TAR_FILE <- file.path(GSE_DIR, "GSE42743_RAW.tar")
+CEL_DIR  <- file.path(GSE_DIR, "CEL")
 OUT_DIR  <- "data/external"
 OUT_FILE <- file.path(OUT_DIR, "GSE42743_rma_expression.csv")
 
