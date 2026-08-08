@@ -102,7 +102,6 @@ DATA_DIR = "data/processed"
 RESULTS_BASE = "results/phase4_cpss"
 
 PI_THRESHOLDS = [0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
-
 # Frozen error-control target (B / A4.4). Applied symmetrically to both cohorts.
 EV_TARGET = 10.0
 
