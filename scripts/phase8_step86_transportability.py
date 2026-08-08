@@ -114,6 +114,12 @@ def main():
 
     # ---- Load ---------------------------------------------------------------
     dev = pd.read_csv(args.per_gene)
+    n_before = len(dev)
+    dev = dev[~dev.gene_id.duplicated(keep="first")]
+    if len(dev) < n_before:
+        logger.info(f"Development: dropped {n_before - len(dev)} duplicate gene_id "
+                    f"rows (14 pseudoautosomal genes annotated on both chrX and "
+                    f"chrY; values are identical -- plan C3)")
     e1 = pd.read_csv(Path(args.external_dir) / "step8_4_univariate_GSE41613.csv")
     e2 = pd.read_csv(Path(args.external_dir) / "step8_4_univariate_GSE42743.csv")
 
@@ -130,6 +136,9 @@ def main():
                 .rename(columns={"coef": "beta_42743", "se": "se_42743",
                                  "p_value": "p_42743", "q_value": "q_42743"}),
                 on="gene_id"))
+    assert d.gene_id.is_unique, "duplicate gene_id survived the merge"
+    assert len(d) <= min(len(e1), len(e2)), \
+        f"merge produced {len(d)} rows from inputs of {len(e1)} and {len(e2)}"
 
     # External pooled: inverse-variance fixed-effect, so the two external
     # cohorts are combined on the same footing as beta_pooled combines the
