@@ -281,6 +281,15 @@ if (length(unmapped_genes) > 0) {
 }
 
 mapped_genes <- jetset_best[jetset_best$mapping_method != "unmapped", ]
+# A probeset can be the Jetset best for more than one symbol -- e.g. the KRT6
+# family, whose members are near-identical on GPL570. Keep one gene per probe
+# so extracted rownames are unique.
+dup_probe <- duplicated(mapped_genes$final_probe)
+if (any(dup_probe)) {
+  cat("Probes serving multiple genes (dropping later):", sum(dup_probe), "\n")
+  print(mapped_genes[dup_probe, c("symbol", "ensg", "final_probe")])
+  mapped_genes <- mapped_genes[!dup_probe, ]
+}
 cat("Final mapped genes:", nrow(mapped_genes), "/", length(target_symbols), "\n")
 attrition$with_probe <- nrow(mapped_genes)
 
