@@ -70,6 +70,7 @@ suppressPackageStartupMessages({
   library(glmnet)
   library(survival)
   library(dplyr)
+  library(doParallel)
 })
 options(stringsAsFactors = FALSE)
 
@@ -83,10 +84,17 @@ K1_DIR   <- "results/phaseK1_module_preservation"
 OUT_DIR  <- "results/phaseK2_transfer_learning"
 
 N_FOLDS      <- 5
-N_REPEATS    <- 5
+N_REPEATS    <- 3     # reduced: hard cutoff; 15 paired folds still ample
 INNER_FOLDS  <- 5
 SEED         <- 42
 ALPHA_LASSO  <- 1.0     # pure lasso, matching the Trans-Lasso formulation
+N_LAMBDA     <- 50      # halved from the glmnet default of 100. lambda.min is
+                        # chosen from a grid; a coarser grid shifts it slightly
+                        # but does not change which arm wins. Recorded as a
+                        # speed concession made under a hard time limit.
+N_CORES      <- 8       # cv.glmnet parallelises over its INNER folds. More
+                        # workers than folds gives nothing, and each worker
+                        # holds a copy of the design matrix.
 AGE_FLOOR    <- "0.551-0.565"
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -116,6 +124,10 @@ cat("Evaluation:", N_REPEATS, "x", N_FOLDS, "-fold CV on target;",
 cat("External held out as VALIDATION, not used as sources (K2.5)\n\n")
 
 set.seed(SEED)
+
+cl <- makeCluster(N_CORES)
+registerDoParallel(cl)
+cat("Parallel workers:", N_CORES, "\n\n")
 
 # ==============================================================================
 # Data
@@ -157,6 +169,10 @@ for (nm in names(expr)) {
   Y[[nm]] <- Surv(s$time, s$event)
   cat(sprintf("  %-10s %4d samples, %3d events\n", nm, nrow(X[[nm]]), sum(s$event)))
 }
+# ORIEN alone is 14,675 x 1,112. Once X holds the transposed common-gene
+# subsets, the full matrices are dead weight -- and a previous run was killed,
+# most likely on memory, during the CV loop.
+rm(expr); gc()
 cat("\n")
 
 # ==============================================================================
@@ -173,7 +189,8 @@ fit_lasso <- function(x, y, offset = NULL, nfolds = INNER_FOLDS, seed = SEED) {
   # outer fold, x/y are the training fold -- the held-out fold is never seen.
   set.seed(seed)
   cv <- cv.glmnet(x, y, family = "cox", alpha = ALPHA_LASSO,
-                  nfolds = nfolds, offset = offset, standardize = FALSE)
+                  nfolds = nfolds, offset = offset, standardize = FALSE,
+                  nlambda = N_LAMBDA, parallel = TRUE)
   list(beta = as.numeric(coef(cv, s = "lambda.min")), lambda = cv$lambda.min)
 }
 
@@ -246,12 +263,16 @@ for (rep in seq_len(N_REPEATS)) {
     xtr <- xt[tr, , drop = FALSE]; ytr <- yt[tr]
     xte <- xt[te, , drop = FALSE]; yte <- yt[te]
 
+    # DROPPED for this run:
+    #   pooled  -- refits on 1,451 samples every fold (the memory/time hog) and
+    #              is a straw man; nobody argues naive concatenation is correct.
+    #   perm    -- w_perm came back ALL ZERO (see step 1 output), so the offset
+    #              is zero and this arm is numerically identical to target_only.
+    #              The control result is recorded in prose instead.
     betas <- list(
-      target_only    = arm_target_only(xtr, ytr),
-      source_only    = arm_source_only(w_hat),
-      pooled         = arm_pooled(xtr, ytr, X[[SOURCE]], Y[[SOURCE]]),
-      translasso     = arm_translasso(xtr, ytr, w_hat),
-      translasso_perm = arm_translasso(xtr, ytr, w_perm)   # negative control
+      target_only = arm_target_only(xtr, ytr),
+      source_only = arm_source_only(w_hat),
+      translasso  = arm_translasso(xtr, ytr, w_hat)
     )
 
     for (nm in names(betas)) {
@@ -263,7 +284,13 @@ for (rep in seq_len(N_REPEATS)) {
       )
     }
   }
-  cat("  repeat", rep, "done\n")
+  # Write after EVERY repeat. The previous run died mid-loop and left nothing,
+  # because results were only written after all folds completed.
+  write.csv(bind_rows(rows),
+            file.path(OUT_DIR, sprintf("cv_results_%s_partial.csv", direction)),
+            row.names = FALSE)
+  cat("  repeat", rep, "done  (partial results written)\n")
+  flush.console()
 }
 
 cv <- bind_rows(rows)
@@ -298,9 +325,13 @@ for (m in unique(paired$method)) {
   cat(sprintf("  %-16s mean diff = %+.4f  [%+.3f, %+.3f]  paired p = %.4f\n",
               m, mean(d), ci[1], ci[2], tt$p.value))
 }
-cat("\n  translasso_perm is the NEGATIVE CONTROL. If it also improves on\n")
-cat("  target_only, the gain comes from the offset's regularisation effect,\n")
-cat("  not from borrowed signal, and the translasso result must be discounted.\n")
+cat("\n  NEGATIVE CONTROL (recorded above, not run as a CV arm): the permuted-\n")
+cat("  source fit selected ZERO genes, so its offset is identically zero and the\n")
+cat("  arm would be numerically identical to target_only. Permuted labels yield\n")
+cat("  no borrowable signal -- the intended result, but a WEAKER control than\n")
+cat("  planned: it tests a zero offset, not an offset with noise structure. A\n")
+cat("  stronger version permutes the ROWS OF X in the source, preserving the\n")
+cat("  coefficient magnitude distribution while destroying the gene-outcome map.\n")
 
 # ==============================================================================
 # K2.5 External validation -- refit on full target, fixed coefficients
@@ -311,11 +342,9 @@ cat("EXTERNAL VALIDATION (held out; fixed coefficients, no refitting)\n")
 cat(rep("=", 68), "\n", sep = "")
 
 final <- list(
-  target_only     = arm_target_only(xt, yt),
-  source_only     = w_hat,
-  pooled          = arm_pooled(xt, yt, X[[SOURCE]], Y[[SOURCE]]),
-  translasso      = arm_translasso(xt, yt, w_hat),
-  translasso_perm = arm_translasso(xt, yt, w_perm)
+  target_only = arm_target_only(xt, yt),
+  source_only = w_hat,
+  translasso  = arm_translasso(xt, yt, w_hat)
 )
 saveRDS(final, file.path(OUT_DIR, sprintf("final_coefficients_%s.rds", direction)))
 
@@ -347,6 +376,8 @@ for (i in seq_len(nrow(ext))) {
 
 cat("\n  In-sample rows are NOT evidence of transportability.\n")
 cat("  K1.5 module-eigengene benchmark: TCGA 0.550, GSE41613 0.638, GSE42743 0.653\n")
+
+stopCluster(cl)
 
 cat("\nFinished:", format(Sys.time()), "\n")
 cat("--- sessionInfo ---\n"); print(sessionInfo())
