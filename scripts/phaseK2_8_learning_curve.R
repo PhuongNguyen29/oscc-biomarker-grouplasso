@@ -74,7 +74,9 @@ EXTERNAL <- c("GSE41613", "GSE42743")
 
 N_GRID       <- c(50, 100, 150, 200, 250, 300)
 N_DRAWS      <- 10
-INNER_FOLDS  <- 5
+INNER_FOLDS  <- 10      # raised from 5: at n=50 (23 events) 5-fold CV leaves
+                        # ~4 events per held-out fold, the partial likelihood is
+                        # nearly flat, and lambda.min collapses to the null model
 N_LAMBDA     <- 50
 ALPHA_LASSO  <- 1.0
 N_CORES      <- 8
@@ -132,12 +134,46 @@ cat("\n")
 cindex <- function(risk, y)
   as.numeric(survival::concordance(y ~ risk, reverse = TRUE)$concordance)
 
+# ------------------------------------------------------------------------------
+# EMPTY-MODEL FALLBACK -- added after draw 1 of the first run
+#
+# In that run target_only selected ZERO genes at n = 50, 150 and 250, scoring
+# C = 0.5 by default, with no monotone trend in n. That is not small-sample
+# behaviour of the lasso; it is lambda selection collapsing. With few events the
+# cross-validated partial likelihood is nearly flat and its minimum lands on the
+# null model.
+#
+# An arm that returns no model is not a competitor, and the apparent transfer
+# advantage in K2 was largely target_only failing to fit rather than transfer
+# adding information. Fallback: if lambda.min gives an empty model, take the
+# LARGEST lambda (strongest penalty) retaining at least one gene -- the sparsest
+# non-trivial model the path contains.
+#
+# This is a CONVENTION, not a better estimator. It is recorded per fit in
+# `lambda_rule` so the frequency of fallback is reportable: if an arm relies on
+# it often, that is itself the finding about fittability at that sample size.
+# ------------------------------------------------------------------------------
 fit_lasso <- function(x, y, offset = NULL, seed = SEED) {
   set.seed(seed)
   cv <- cv.glmnet(x, y, family = "cox", alpha = ALPHA_LASSO,
                   nfolds = INNER_FOLDS, offset = offset, standardize = FALSE,
                   nlambda = N_LAMBDA, parallel = TRUE)
-  as.numeric(coef(cv, s = "lambda.min"))
+  b <- as.numeric(coef(cv, s = "lambda.min"))
+  rule <- "lambda.min"
+
+  if (all(b == 0)) {
+    df <- cv$glmnet.fit$df                 # nonzero count along the path
+    ok <- which(df >= 1)
+    if (length(ok)) {
+      # lambda is stored in decreasing order, so the first index with df >= 1
+      # is the largest lambda giving a non-empty model
+      b <- as.numeric(coef(cv$glmnet.fit, s = cv$glmnet.fit$lambda[ok[1]]))
+      rule <- "fallback_min_nonzero"
+    } else {
+      rule <- "empty_path"                 # no lambda on the path selects anything
+    }
+  }
+  list(beta = b, rule = rule)
 }
 
 # ==============================================================================
@@ -146,8 +182,10 @@ fit_lasso <- function(x, y, offset = NULL, seed = SEED) {
 # ==============================================================================
 
 cat("--- Source fit on", SOURCE, "(once) ---\n")
-w_hat <- fit_lasso(X[[SOURCE]], Y[[SOURCE]])
-cat("  nonzero:", sum(w_hat != 0), "/", length(w_hat), "\n\n")
+src_fit <- fit_lasso(X[[SOURCE]], Y[[SOURCE]])
+w_hat <- src_fit$beta
+cat("  nonzero:", sum(w_hat != 0), "/", length(w_hat),
+    "| rule:", src_fit$rule, "\n\n")
 
 # ==============================================================================
 # Learning curve
@@ -174,10 +212,13 @@ for (draw in seq_len(N_DRAWS)) {
 
     xtr <- xt[idx, , drop = FALSE]; ytr <- yt[idx]
 
-    b_target <- fit_lasso(xtr, ytr, seed = SEED + draw)
-    b_trans  <- w_hat + fit_lasso(xtr, ytr,
-                                  offset = as.numeric(xtr %*% w_hat),
-                                  seed = SEED + draw)
+    f_target <- fit_lasso(xtr, ytr, seed = SEED + draw)
+    f_delta  <- fit_lasso(xtr, ytr, offset = as.numeric(xtr %*% w_hat),
+                          seed = SEED + draw)
+    b_target <- f_target$beta
+    b_trans  <- w_hat + f_delta$beta
+    rules <- c(target_only = f_target$rule, source_only = src_fit$rule,
+               translasso = f_delta$rule)
 
     evals <- list(
       TCGA_heldout = list(x = xt[te, , drop = FALSE], y = yt[te]),
@@ -195,6 +236,7 @@ for (draw in seq_len(N_DRAWS)) {
           arm = arm, eval_set = ev_nm,
           n_test = nrow(e$x), n_events_test = sum(e$y[, "status"]),
           n_nonzero = sum(b != 0),
+          lambda_rule = rules[[arm]],
           c_index = cindex(as.numeric(e$x %*% b), e$y)
         )
       }
@@ -227,6 +269,16 @@ for (ev_nm in unique(lc$eval_set)) {
     tidyr::pivot_wider(names_from = arm, values_from = c(C, sd))
   print(as.data.frame(tab), row.names = FALSE, digits = 3)
 }
+
+cat("\n--- How often did the empty-model fallback fire? ---\n")
+cat("An arm relying on it often is not reliably fittable at that sample size,\n")
+cat("which qualifies any comparison against it.\n\n")
+fb <- lc %>% filter(eval_set == "GSE41613") %>%
+  group_by(n_train, arm) %>%
+  summarise(n_fits = n(), fallback = sum(lambda_rule == "fallback_min_nonzero"),
+            empty = sum(lambda_rule == "empty_path"),
+            mean_nonzero = mean(n_nonzero), .groups = "drop")
+print(as.data.frame(fb), row.names = FALSE, digits = 3)
 
 cat("\n", rep("=", 70), "\n", sep = "")
 cat("TRANSFER BREAK-EVEN SAMPLE SIZE\n")
