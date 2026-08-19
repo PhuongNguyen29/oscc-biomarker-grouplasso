@@ -122,7 +122,7 @@ SEED         <- 42
 # K2.9 carries the K2.8 empty-model fallback. That distinction matters here
 # because K2.8 showed the apparent transfer advantage was partly target-only
 # collapsing to a null model -- the very behaviour the fallback removes.
-ALPHA_GRID   <- c(0.3, 0.5, 0.7, 0.9, 1.0)
+ALPHA_GRID   <- c(0.2, 0.3,0.4, 0.5,0.6, 0.7,0.8, 0.9, 1.0)
 N_LAMBDA     <- 50      # halved from the glmnet default of 100. lambda.min is
                         # chosen from a grid; a coarser grid shifts it slightly
                         # but does not change which arm wins. Recorded as a
