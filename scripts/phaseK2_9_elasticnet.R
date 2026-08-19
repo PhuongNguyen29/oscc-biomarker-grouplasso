@@ -171,8 +171,8 @@ read_surv <- function(p) {
 }
 
 expr <- list(
-  TCGA     = load_expr(file.path(PROC_DIR, "tcga_preprocessed_v4.csv")),
-  ORIEN    = load_expr(file.path(PROC_DIR, "orien_preprocessed_v4.csv")),
+  TCGA     = load_expr(file.path(PROC_DIR, "tcga_corrected_preprocessed_v4.csv")),
+  ORIEN    = load_expr(file.path(PROC_DIR, "orien_corrected_preprocessed_v4.csv")),
   GSE41613 = load_expr(file.path(EXT_DIR,  "GSE41613_expression.csv")),
   GSE42743 = load_expr(file.path(EXT_DIR,  "GSE42743_expression.csv"))
 )

@@ -38,12 +38,12 @@ DEFAULT_PROCESSED_DIR = "data/processed"
 # v4 file naming convention
 FILE_MAP = {
     'tcga': {
-        'expression': 'tcga_preprocessed_v4.csv',
+        'expression': 'tcga_corrected_preprocessed_v4.csv',
         'survival': 'surv_tcga_aligned_v4.csv',
         'clinical': 'clinical_tcga_aligned_v4.csv',
     },
     'orien': {
-        'expression': 'orien_preprocessed_v4.csv',
+        'expression': 'orien_corrected_preprocessed_v4.csv',
         'survival': 'surv_orien_aligned_v4.csv',
         'clinical': 'clinical_orien_aligned_v4.csv',
     },
