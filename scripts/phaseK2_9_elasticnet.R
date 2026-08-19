@@ -117,7 +117,12 @@ SEED         <- 42
 # The same value is used in BOTH steps -- step 1 (source) and step 2 (delta) --
 # so a single number describes the estimator. Sweeping them independently would
 # be a 2-D search and invites tuning on the outcome.
-ALPHA_GRID   <- c(0.2,0.3,0.4, 0.5,0.6, 0.7,0.8, 0.9, 1.0)   # 1.0 reproduces K2 exactly
+# alpha = 1.0 is the PURE-LASSO COMPARATOR UNDER K2.9 RULES. It does NOT
+# numerically reproduce the original K2 run: K2 used bare lambda.min, whereas
+# K2.9 carries the K2.8 empty-model fallback. That distinction matters here
+# because K2.8 showed the apparent transfer advantage was partly target-only
+# collapsing to a null model -- the very behaviour the fallback removes.
+ALPHA_GRID   <- c(0.3, 0.5, 0.7, 0.9, 1.0)
 N_LAMBDA     <- 50      # halved from the glmnet default of 100. lambda.min is
                         # chosen from a grid; a coarser grid shifts it slightly
                         # but does not change which arm wins. Recorded as a
@@ -163,7 +168,31 @@ cat("Parallel workers:", N_CORES, "\n\n")
 # Data
 # ==============================================================================
 
-load_expr <- function(p) as.matrix(read.csv(p, row.names = 1, check.names = FALSE))
+# Phase 1 has been revised more than once and has written both
+# *_preprocessed_v4.csv and *_corrected_preprocessed_v4.csv at different times.
+# Those are DIFFERENT objects: post-ComBat pre-z vs z-scored + clipped. Loading
+# the wrong one would silently change the coefficient scale that x %*% w_hat
+# depends on. Report what is actually on disk, and check the loaded matrix
+# looks z-scored, rather than trusting the filename.
+cand <- list.files(PROC_DIR, pattern = "preprocessed_v4\\.csv$", full.names = TRUE)
+cat("--- Candidate preprocessed files in", PROC_DIR, "---\n")
+for (f in cand) cat("   ", basename(f), "\n")
+cat("\n")
+
+load_expr <- function(p) {
+  if (!file.exists(p)) stop("Expression file not found: ", p,
+                            "\nSee the candidate list above.")
+  m <- as.matrix(read.csv(p, row.names = 1, check.names = FALSE))
+  # glmnet is called with standardize = FALSE because Phase 1 already z-scored
+  # per gene. If the matrix is NOT z-scored, that assumption is wrong and every
+  # coefficient is on the wrong scale.
+  gm <- mean(rowMeans(m)); gs <- mean(apply(m, 1, sd))
+  cat(sprintf("    %-42s %5d x %4d | mean gene mean %+.3f, mean gene sd %.3f%s\n",
+              basename(p), nrow(m), ncol(m), gm, gs,
+              if (abs(gm) > 0.1 || abs(gs - 1) > 0.2)
+                "  <-- NOT z-scored: check the file" else ""))
+  m
+}
 read_surv <- function(p) {
   s <- read.csv(p)
   if (!"sampleID" %in% names(s)) names(s)[1] <- "sampleID"
@@ -171,8 +200,8 @@ read_surv <- function(p) {
 }
 
 expr <- list(
-  TCGA     = load_expr(file.path(PROC_DIR, "tcga_corrected_preprocessed_v4.csv")),
-  ORIEN    = load_expr(file.path(PROC_DIR, "orien_corrected_preprocessed_v4.csv")),
+  TCGA     = load_expr(file.path(PROC_DIR, "tcga_preprocessed_v4.csv")),
+  ORIEN    = load_expr(file.path(PROC_DIR, "orien_preprocessed_v4.csv")),
   GSE41613 = load_expr(file.path(EXT_DIR,  "GSE41613_expression.csv")),
   GSE42743 = load_expr(file.path(EXT_DIR,  "GSE42743_expression.csv"))
 )
@@ -255,8 +284,25 @@ for (a in ALPHA_GRID) {
   sf <- fit_en(X[[SOURCE]], Y[[SOURCE]], alpha = a)
   w_hat <- sf$beta
   cat("  source fit:", sum(w_hat != 0), "nonzero | rule:", sf$rule, "\n")
+
+  # NEGATIVE CONTROL, refitted at EVERY alpha.
+  # K2 justified dropping this on the grounds that the permuted-source lasso
+  # selected zero genes, making its offset identically zero. That reasoning does
+  # NOT carry to K2.9: the ridge component at alpha < 1 and the empty-model
+  # fallback both make a nonzero permuted source likely. Without it, a positive
+  # transfer result cannot be separated from the offset simply acting as
+  # shrinkage.
+  #   trans_en > target_only AND trans_en > perm_trans  => real borrowing
+  #   trans_en ~ perm_trans > target_only               => regularisation artefact
+  set.seed(SEED + 999)
+  perm <- sample(nrow(X[[SOURCE]]))
+  sfp <- fit_en(X[[SOURCE]], Y[[SOURCE]][perm], alpha = a, seed = SEED + 999)
+  w_perm <- sfp$beta
+  cat("  permuted source:", sum(w_perm != 0), "nonzero | rule:", sfp$rule, "\n")
+
   src_info[[as.character(a)]] <- data.frame(
-    l1_ratio = a, source_nonzero = sum(w_hat != 0), source_rule = sf$rule)
+    l1_ratio = a, source_nonzero = sum(w_hat != 0), source_rule = sf$rule,
+    perm_nonzero = sum(w_perm != 0), perm_rule = sfp$rule)
 
   for (rep in seq_len(N_REPEATS)) {
     set.seed(SEED + rep)                       # same folds for every alpha
@@ -272,15 +318,18 @@ for (a in ALPHA_GRID) {
       xtr <- xt[tr, , drop = FALSE]; ytr <- yt[tr]
       xte <- xt[te, , drop = FALSE]; yte <- yt[te]
 
-      f_t <- fit_en(xtr, ytr, alpha = a, seed = SEED + rep)
-      f_d <- fit_en(xtr, ytr, alpha = a, offset = as.numeric(xtr %*% w_hat),
-                    seed = SEED + rep)
+      f_t  <- fit_en(xtr, ytr, alpha = a, seed = SEED + rep)
+      f_d  <- fit_en(xtr, ytr, alpha = a, offset = as.numeric(xtr %*% w_hat),
+                     seed = SEED + rep)
+      f_dp <- fit_en(xtr, ytr, alpha = a, offset = as.numeric(xtr %*% w_perm),
+                     seed = SEED + rep)
 
       betas <- list(target_only = f_t$beta,
                     source_only = w_hat,
-                    translasso  = w_hat + f_d$beta)
+                    trans_en    = w_hat + f_d$beta,
+                    perm_trans  = w_perm + f_dp$beta)
       rules <- c(target_only = f_t$rule, source_only = sf$rule,
-                 translasso = f_d$rule)
+                 trans_en = f_d$rule, perm_trans = f_dp$rule)
 
       for (nm in names(betas)) {
         b <- betas[[nm]]
@@ -345,9 +394,43 @@ for (m in unique(cv$method)) {
 cat("\n--- Best method at each l1_ratio ---\n")
 for (a in ALPHA_GRID) {
   t <- tab[tab$l1_ratio == a, ]
-  cat(sprintf("  l1=%.1f  target %.4f  source %.4f  trans %.4f   best: %s\n",
-              a, t$C[t$method == "target_only"], t$C[t$method == "source_only"],
-              t$C[t$method == "translasso"], t$method[which.max(t$C)]))
+  g <- function(m) if (m %in% t$method) t$C[t$method == m] else NA_real_
+  cat(sprintf("  l1=%.1f  target %.4f  source %.4f  trans %.4f  perm %.4f   best: %s\n",
+              a, g("target_only"), g("source_only"), g("trans_en"),
+              g("perm_trans"), t$method[which.max(t$C)]))
+}
+
+# ---- NEGATIVE CONTROL: the decisive comparison ------------------------------
+cat("\n", rep("=", 70), "\n", sep = "")
+cat("NEGATIVE CONTROL — is the transfer benefit real borrowing?\n")
+cat(rep("=", 70), "\n", sep = "")
+cat("perm_trans uses a source fitted to SHUFFLED survival labels. Any gain it\n")
+cat("shows over target_only comes from the offset acting as shrinkage, not from\n")
+cat("ORIEN information. trans_en must beat BOTH to support real borrowing.\n\n")
+
+pw <- cv %>% select(l1_ratio, repeat_id, fold, method, c_index) %>%
+  tidyr::pivot_wider(names_from = method, values_from = c_index)
+for (a in ALPHA_GRID) {
+  d <- pw[pw$l1_ratio == a, ]
+  if (!nrow(d) || !"perm_trans" %in% names(d)) next
+  d1 <- d$trans_en - d$perm_trans
+  d2 <- d$perm_trans - d$target_only
+  cat(sprintf("  l1=%.1f\n", a))
+  cat(sprintf("    trans_en - perm_trans : %+.4f  wins %2d/%2d  p=%.4f\n",
+              mean(d1, na.rm = TRUE), sum(d1 > 0, na.rm = TRUE), sum(!is.na(d1)),
+              suppressWarnings(wilcox.test(d$trans_en, d$perm_trans,
+                                           paired = TRUE)$p.value)))
+  cat(sprintf("    perm_trans - target   : %+.4f  wins %2d/%2d  p=%.4f\n",
+              mean(d2, na.rm = TRUE), sum(d2 > 0, na.rm = TRUE), sum(!is.na(d2)),
+              suppressWarnings(wilcox.test(d$perm_trans, d$target_only,
+                                           paired = TRUE)$p.value)))
+  verdict <- if (mean(d1, na.rm = TRUE) > 0 &&
+                 mean(d$trans_en - d$target_only, na.rm = TRUE) > 0)
+    "real borrowing supported"
+  else if (mean(d2, na.rm = TRUE) > 0)
+    "gain attributable to the offset, NOT to source signal"
+  else "no transfer benefit"
+  cat("    verdict:", verdict, "\n")
 }
 
 cat("\n  PRE-SPECIFIED EXPECTATION was |difference| < 0.02 across l1_ratio,\n")
