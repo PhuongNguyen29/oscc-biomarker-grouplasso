@@ -117,7 +117,7 @@ SEED         <- 42
 # The same value is used in BOTH steps -- step 1 (source) and step 2 (delta) --
 # so a single number describes the estimator. Sweeping them independently would
 # be a 2-D search and invites tuning on the outcome.
-ALPHA_GRID   <- c(0.3, 0.5, 0.7, 0.9, 1.0)   # 1.0 reproduces K2 exactly
+ALPHA_GRID   <- c(0.2,0.3,0.4, 0.5,0.6, 0.7,0.8, 0.9, 1.0)   # 1.0 reproduces K2 exactly
 N_LAMBDA     <- 50      # halved from the glmnet default of 100. lambda.min is
                         # chosen from a grid; a coarser grid shifts it slightly
                         # but does not change which arm wins. Recorded as a
