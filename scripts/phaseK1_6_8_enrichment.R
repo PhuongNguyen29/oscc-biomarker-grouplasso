@@ -2,68 +2,84 @@
 # ==============================================================================
 # Phase K1.6.8: What kind of biology does each selection method pick?
 # ==============================================================================
+# DEPENDENCY-FREE VERSION -- base R only, plus WGCNA (already installed).
 #
-# THE CLAIM BEING TESTED
-# ----------------------
-# K1.6.7 found that the two selection methods fail in opposite ways:
+# clusterProfiler would not build on IDAS: it pulls in `Deriv`, whose current
+# version calls R_ClosureFormals, a C API function newer than the R 4.4.1
+# headers here. Rather than fight the dependency chain, this computes
+# over-representation directly. enrichGO/enricher are convenience wrappers
+# around a hypergeometric test, and phyper() is that test:
 #
-#   lasso : 97th-100th percentile on effect size and cross-cohort beta
-#           concordance, but ZERO selection reproducibility (0/42 cells)
-#   kME   : Kuncheva 0.51 reproducibility, but 0.1st-3.3rd percentile on
-#           cross-cohort beta concordance and 0th-4.6th on effect size --
-#           SIGNIFICANTLY WORSE than random sets of the same size
+#   p = P(X >= k),  X ~ Hypergeometric
+#     N = background universe (4,702 genes common to all four cohorts)
+#     K = genes in the term, RESTRICTED TO THE UNIVERSE
+#     n = size of the selected set
+#     k = overlap
 #
-# A plausible explanation is that hub genes -- the most connected members of a
-# module -- are housekeeping-like: stably co-expressed, biologically central,
-# prognostically inert. That is currently an INTERPRETATION, not a finding.
-# This script tests it.
+# Gene sets come from a local GMT file. If none is present the annotation-free
+# checks still run, and those are the more direct evidence anyway.
 #
-# PREDICTION, RECORDED BEFORE RUNNING
-# -----------------------------------
-#   hubs   enrich for translation / ribosome / oxidative phosphorylation /
-#          RNA processing  (housekeeping)
-#   lasso  enrich for ECM / hypoxia / EMT / immune  (tumour biology)
+# THE CLAIM UNDER TEST -- AND ITS FIRST REFUTATION
+# ------------------------------------------------
+# K1.6.7 found the two methods fail in opposite ways:
+#   lasso : 97th-100th percentile on effect size / cross-cohort concordance,
+#           ZERO selection reproducibility (0/42 cells)
+#   kME   : Kuncheva 0.51 reproducibility, but 0.1st-4.6th percentile on effect
+#           size -- significantly WORSE than random sets of the same size
 #
-# If hubs enrich for nothing, the housekeeping claim is DROPPED rather than
-# argued. That commitment is the point of running this.
+# The proposed explanation was that hub genes are housekeeping-like.
+# ALREADY REFUTED by the annotation-free check: hub median IQR is 2.424 (94.5th
+# percentile of the universe) vs lasso 2.032 (83rd). Hub genes are the MOST
+# variable genes, not the least, and housekeeping genes are low-variance by
+# definition.
 #
-# BACKGROUND UNIVERSE
-# -------------------
-# The background is the 4,702 genes common to all four cohorts -- NOT the whole
-# genome. Using a genome background would test whether the IQR filter enriched
-# for something, which is a different and uninteresting question, and would make
-# almost everything look significant. This is the standard error in enrichment
-# analysis of a pre-filtered feature space.
+# In hindsight it is wrong by construction: WGCNA builds correlation networks,
+# and a gene needs variance to correlate with anything. Low-variance genes land
+# in grey and cannot be hubs.
+#
+# THE REMAINING PUZZLE, which this addresses
+# ------------------------------------------
+# Hub genes are MORE variable than lasso genes yet have SMALLER marginal effects
+# (median |beta| 0.045 vs 0.057). They vary strongly and coherently across
+# patients, and that variation does not predict survival. What coherent
+# high-variance programme is it? Proliferation, immune infiltration and stromal
+# content are all plausible and all testable.
+#
+# Only 6 genes overlap between the 309 hub and 303 lasso sets -- near-disjoint
+# biology from the same 4,702 genes.
+#
+# COMMITMENT: if the enrichment gives nothing interpretable, no mechanism is
+# asserted, and K1.6.7 is reported as a bare reproducibility/signal trade-off.
 #
 # References:
-#   Subramanian A et al. (2005) PNAS 102:15545-15550 -- gene set enrichment
 #   Liberzon A et al. (2015) Cell Syst 1:417-425 -- Hallmark gene sets
 #   Benjamini Y, Hochberg Y (1995) JRSS-B 57:289-300 -- FDR
-#   Young MD et al. (2010) Genome Biol 11:R14 -- selection bias in GO analysis
+#   Young MD et al. (2010) Genome Biol 11:R14 -- background choice matters
+#
+# GMT files (download once, no install):
+#   https://www.gsea-msigdb.org/gsea/downloads.jsp
+#     h.all.v2023.2.Hs.symbols.gmt      Hallmark, 50 sets -- start here
+#     c5.go.bp.v2023.2.Hs.symbols.gmt   GO Biological Process
+#   Place in data/genesets/
 #
 # Usage:
 #   Rscript scripts/phaseK1_6_8_enrichment.R
 # ==============================================================================
 
-suppressPackageStartupMessages({
-  library(dplyr)
-  ok_cp <- requireNamespace("clusterProfiler", quietly = TRUE) &&
-           requireNamespace("org.Hs.eg.db", quietly = TRUE)
-  if (ok_cp) { library(clusterProfiler); library(org.Hs.eg.db) }
-  ok_msig <- requireNamespace("msigdbr", quietly = TRUE)
-  if (ok_msig) library(msigdbr)
-})
+suppressPackageStartupMessages({ library(WGCNA); library(dplyr) })
 options(stringsAsFactors = FALSE)
 
 HUB_DIR  <- "results/phaseK1_6_hub_overlap"
-SURV_DIR <- "results/phaseK1_6_7_hub_survival"
 E8_DIR   <- "results/phase8_transportability"
 K1_DIR   <- "results/phaseK1_module_preservation"
 CPSS_DIR <- "results/phase4_cpss_FINAL"
+GMT_DIR  <- "data/genesets"
 OUT_DIR  <- "results/phaseK1_6_8_enrichment"
 
-Q_CUTOFF <- 0.10
-SEED     <- 42
+MIN_TERM_SIZE <- 10     # smaller terms give unstable hypergeometric estimates
+MAX_TERM_SIZE <- 500    # very large terms are uninformative
+Q_CUTOFF      <- 0.10
+SEED          <- 42
 
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 dir.create("logs", showWarnings = FALSE)
@@ -72,30 +88,26 @@ log_file <- file.path("logs",
 log_con <- file(log_file, open = "wt")
 sink(log_con, split = TRUE); sink(log_con, type = "message")
 
-cat("Phase K1.6.8: enrichment of hub vs lasso gene sets\n")
-cat("Started:", format(Sys.time()), "\n")
-if (!ok_cp) cat("\n*** clusterProfiler / org.Hs.eg.db not installed:\n",
-                "*** BiocManager::install(c('clusterProfiler','org.Hs.eg.db','msigdbr'))\n\n")
+cat("Phase K1.6.8: enrichment of hub vs lasso sets (dependency-free)\n")
+cat("Started:", format(Sys.time()), "\n\n")
 set.seed(SEED)
 
 # ==============================================================================
-# Universe and gene sets -- rebuilt exactly as in K1.6.7
+# Universe and gene sets
 # ==============================================================================
 
 cat("--- Universe and gene sets ---\n")
 b4 <- read.csv(file.path(E8_DIR, "four_cohort_betas.csv"))
 universe <- b4$gene_id
 sym <- setNames(b4$gene_symbol, b4$gene_id)
-cat("  background universe:", length(universe), "genes (4 cohorts common)\n")
+cat("  background universe:", length(universe), "genes\n")
 
 mods  <- read.csv(file.path(K1_DIR, "module_assignments.csv"))
 pairs <- read.csv(file.path(HUB_DIR, "module_pairs.csv"))
 
-suppressPackageStartupMessages(library(WGCNA))
 load_expr <- function(p) as.matrix(read.csv(p, row.names = 1, check.names = FALSE))
-ex <- list(
-  TCGA  = load_expr("data/processed/tcga_corrected_preprocessed_v4.csv"),
-  ORIEN = load_expr("data/processed/orien_corrected_preprocessed_v4.csv"))
+ex <- list(TCGA  = load_expr("data/processed/tcga_corrected_preprocessed_v4.csv"),
+           ORIEN = load_expr("data/processed/orien_corrected_preprocessed_v4.csv"))
 g_all <- mods$gene_id
 kme <- list()
 for (co in c("TCGA", "ORIEN")) {
@@ -128,126 +140,160 @@ lasso_set <- function(n) {
            rownames(po)[order(-po[, 1])][seq_len(h)]))
 }
 
-# k = 40 gives 309 hub genes, the largest set in K1.6.7 and the one with the
-# clearest separation (hub 0.1st percentile, lasso 97.6th)
 hub   <- hub_set(40)
 lasso <- lasso_set(length(hub))
 cat("  hub set:  ", length(hub),  "genes\n")
 cat("  lasso set:", length(lasso), "genes\n")
-cat("  overlap between the two:", length(intersect(hub, lasso)), "genes\n\n")
+cat("  overlap:  ", length(intersect(hub, lasso)), "genes\n\n")
 
-writeLines(sort(sym[hub]),   file.path(OUT_DIR, "hub_symbols.txt"))
-writeLines(sort(sym[lasso]), file.path(OUT_DIR, "lasso_symbols.txt"))
+writeLines(sort(unname(sym[hub])),   file.path(OUT_DIR, "hub_symbols.txt"))
+writeLines(sort(unname(sym[lasso])), file.path(OUT_DIR, "lasso_symbols.txt"))
 
 # ==============================================================================
-# Enrichment
+# Hypergeometric over-representation
 # ==============================================================================
 
-to_entrez <- function(ensg) {
-  s <- suppressWarnings(
-    AnnotationDbi::select(org.Hs.eg.db, keys = ensg, keytype = "ENSEMBL",
-                          columns = "ENTREZID"))
-  unique(na.omit(s$ENTREZID))
+read_gmt <- function(path) {
+  ln <- strsplit(readLines(path), "\t")
+  setNames(lapply(ln, function(x) unique(x[-c(1, 2)])), sapply(ln, `[`, 1))
 }
 
-run_go <- function(genes, bg, label) {
-  cat("\n### GO Biological Process —", label, "###\n")
-  e <- enrichGO(gene = to_entrez(genes), universe = to_entrez(bg),
-                OrgDb = org.Hs.eg.db, ont = "BP",
-                pAdjustMethod = "BH", qvalueCutoff = Q_CUTOFF,
-                readable = TRUE)
-  if (is.null(e) || nrow(as.data.frame(e)) == 0) {
-    cat("  NO significant terms at q <", Q_CUTOFF, "\n")
-    return(NULL)
+enrich <- function(set_sym, bg_sym, gs, label) {
+  cat("\n### ", label, " ###\n", sep = "")
+  # Restricting each term to the background is what makes this a test about the
+  # 4,702-gene universe rather than the genome. Skipping it would mostly test
+  # whether the IQR filter enriched for something (Young et al. 2010).
+  gs <- lapply(gs, intersect, bg_sym)
+  sz <- sapply(gs, length)
+  gs <- gs[sz >= MIN_TERM_SIZE & sz <= MAX_TERM_SIZE]
+  if (!length(gs)) { cat("  no usable terms after size filtering\n"); return(NULL) }
+
+  N <- length(bg_sym); n <- length(set_sym)
+  res <- bind_rows(lapply(names(gs), function(t) {
+    K <- length(gs[[t]]); k <- length(intersect(set_sym, gs[[t]]))
+    data.frame(term = t, term_size = K, overlap = k, expected = n * K / N,
+               fold = (k / n) / (K / N),
+               p = phyper(k - 1, K, N - K, n, lower.tail = FALSE),
+               genes = paste(sort(intersect(set_sym, gs[[t]])), collapse = ","))
+  }))
+  res$q <- p.adjust(res$p, method = "BH")
+  res <- res[order(res$p), ]
+
+  sig <- res[res$q < Q_CUTOFF, ]
+  if (!nrow(sig)) {
+    cat("  NO terms at q <", Q_CUTOFF, ". Top 5 by p:\n")
+    for (i in seq_len(min(5, nrow(res))))
+      cat(sprintf("    %-50s %2d/%3d fold %.2f p=%.3f q=%.2f\n",
+                  substr(res$term[i], 1, 50), res$overlap[i], res$term_size[i],
+                  res$fold[i], res$p[i], res$q[i]))
+  } else {
+    cat(sprintf("  %d terms at q < %.2f. Top 15:\n", nrow(sig), Q_CUTOFF))
+    for (i in seq_len(min(15, nrow(sig))))
+      cat(sprintf("    %-50s %2d/%3d fold %.2f q=%.2e\n",
+                  substr(sig$term[i], 1, 50), sig$overlap[i], sig$term_size[i],
+                  sig$fold[i], sig$q[i]))
   }
-  d <- as.data.frame(e)
-  cat(sprintf("  %d terms at q < %.2f. Top 15:\n", nrow(d), Q_CUTOFF))
-  for (i in seq_len(min(15, nrow(d)))) {
-    cat(sprintf("    %-58s %8s q=%.2e\n",
-                substr(d$Description[i], 1, 58), d$GeneRatio[i], d$qvalue[i]))
-  }
-  d$set <- label
-  d
+  res$set <- label
+  res
 }
 
-run_hallmark <- function(genes, bg, label) {
-  if (!ok_msig) { cat("\n  (msigdbr not installed; skipping Hallmark)\n"); return(NULL) }
-  cat("\n### MSigDB Hallmark —", label, "###\n")
-  h <- msigdbr(species = "Homo sapiens", category = "H")
-  t2g <- h[, c("gs_name", "human_gene_symbol")]
-  names(t2g) <- c("term", "gene")
-  e <- enricher(gene = unname(sym[genes]), universe = unname(sym[bg]),
-                TERM2GENE = t2g, pAdjustMethod = "BH", qvalueCutoff = Q_CUTOFF)
-  if (is.null(e) || nrow(as.data.frame(e)) == 0) {
-    cat("  NO significant terms at q <", Q_CUTOFF, "\n")
-    return(NULL)
+gmts <- list.files(GMT_DIR, pattern = "\\.gmt$", full.names = TRUE)
+all_res <- list()
+if (length(gmts)) {
+  bg_sym <- unname(sym[universe]); bg_sym <- bg_sym[nchar(bg_sym) > 0]
+  for (g in gmts) {
+    cat("\n", rep("=", 76), "\n", sep = "")
+    cat("GMT:", basename(g), "\n")
+    cat("BACKGROUND =", length(bg_sym), "gene analysis universe, NOT the genome\n")
+    cat(rep("=", 76), "\n", sep = "")
+    gs <- read_gmt(g)
+    cat("  terms in file:", length(gs), "\n")
+    all_res[[paste0(basename(g), "_hub")]] <-
+      enrich(unname(sym[hub]), bg_sym, gs, paste0("HUB (kME) — ", basename(g)))
+    all_res[[paste0(basename(g), "_lasso")]] <-
+      enrich(unname(sym[lasso]), bg_sym, gs, paste0("LASSO (CPSS) — ", basename(g)))
   }
-  d <- as.data.frame(e)
-  cat(sprintf("  %d terms at q < %.2f. Top 15:\n", nrow(d), Q_CUTOFF))
-  for (i in seq_len(min(15, nrow(d)))) {
-    cat(sprintf("    %-52s %8s q=%.2e\n",
-                sub("^HALLMARK_", "", substr(d$ID[i], 1, 52)),
-                d$GeneRatio[i], d$qvalue[i]))
+  out <- bind_rows(all_res[!sapply(all_res, is.null)])
+  if (nrow(out)) {
+    write.csv(out, file.path(OUT_DIR, "enrichment_results.csv"), row.names = FALSE)
+    cat("\n  Full table:", file.path(OUT_DIR, "enrichment_results.csv"), "\n")
   }
-  d$set <- label
-  d
-}
-
-res <- list()
-if (ok_cp) {
+} else {
+  cat("\n", rep("=", 76), "\n", sep = "")
+  cat("NO GMT FILES FOUND in", GMT_DIR, "\n")
   cat(rep("=", 76), "\n", sep = "")
-  cat("BACKGROUND = the 4,702-gene analysis universe, NOT the genome\n")
-  cat(rep("=", 76), "\n", sep = "")
-  res$go_hub     <- run_go(hub,   universe, "HUB (kME)")
-  res$go_lasso   <- run_go(lasso, universe, "LASSO (CPSS)")
-  res$hm_hub     <- run_hallmark(hub,   universe, "HUB (kME)")
-  res$hm_lasso   <- run_hallmark(lasso, universe, "LASSO (CPSS)")
-  out <- bind_rows(res[!sapply(res, is.null)])
-  if (nrow(out)) write.csv(out, file.path(OUT_DIR, "enrichment_results.csv"),
-                           row.names = FALSE)
+  cat("Download from https://www.gsea-msigdb.org/gsea/downloads.jsp:\n")
+  cat("  h.all.v2023.2.Hs.symbols.gmt      Hallmark, 50 sets — start here\n")
+  cat("  c5.go.bp.v2023.2.Hs.symbols.gmt   GO Biological Process\n")
+  cat("Place in", GMT_DIR, "and rerun. Symbols are written to", OUT_DIR, "\n")
+  cat("so they can also be pasted into a web tool in the meantime.\n")
 }
 
 # ==============================================================================
-# Direct test of the housekeeping reading, independent of any annotation
+# Annotation-free characterisation -- the more direct evidence
 # ==============================================================================
 
 cat("\n", rep("=", 76), "\n", sep = "")
-cat("ANNOTATION-FREE CHECK: are hub genes more highly and stably expressed?\n")
+cat("ANNOTATION-FREE CHARACTERISATION\n")
 cat(rep("=", 76), "\n", sep = "")
-cat("Housekeeping genes are typically high-expressing and low-variance. This\n")
-cat("tests the interpretation without relying on GO terms at all.\n\n")
+
+pctile <- function(v, x) 100 * mean(v < x, na.rm = TRUE)
 
 iqr_file <- "data/processed/iqr_filtered_v4_prez/iqr_filter_values_v4.csv"
 if (file.exists(iqr_file)) {
-  iq <- read.csv(iqr_file)
-  gcol <- names(iq)[1]
+  iq <- read.csv(iqr_file); gcol <- names(iq)[1]
   cols <- grep("iqr", names(iq), ignore.case = TRUE, value = TRUE)
-  cat(sprintf("  %-16s %8s %10s %10s\n", "set", "n", "median IQR", "pctile"))
+  cat("\n-- expression variability (IQR) --\n")
+  cat("  Housekeeping genes are LOW variance; this already refutes that reading.\n")
+  cat(sprintf("  %-8s %6s %12s %10s\n", "set", "n", "median IQR", "pctile"))
   for (nm in c("hub", "lasso")) {
     g <- if (nm == "hub") hub else lasso
-    v <- iq[[cols[1]]][match(g, iq[[gcol]])]
-    v <- v[!is.na(v)]
-    all_v <- iq[[cols[1]]]
-    cat(sprintf("  %-16s %8d %10.3f %9.1f%%\n", nm, length(v), median(v),
-                100 * mean(all_v < median(v), na.rm = TRUE)))
+    v <- iq[[cols[1]]][match(g, iq[[gcol]])]; v <- v[!is.na(v)]
+    cat(sprintf("  %-8s %6d %12.3f %9.1f%%\n", nm, length(v), median(v),
+                pctile(iq[[cols[1]]], median(v))))
   }
-  cat("\n  Lower IQR for hubs would support the housekeeping reading: stable\n")
-  cat("  expression is exactly what makes a gene highly connected and\n")
-  cat("  prognostically uninformative.\n")
-} else {
-  cat("  iqr_filter_values_v4.csv not found; skipping.\n")
 }
+
+cat("\n-- marginal effect size and cross-cohort agreement --\n")
+cat(sprintf("  %-8s %6s %12s %14s %12s\n",
+            "set", "n", "med |b_dev|", "sign dev-ext", "rho dev-ext"))
+for (nm in c("hub", "lasso")) {
+  g <- if (nm == "hub") hub else lasso
+  d <- b4[b4$gene_id %in% g, ]
+  cat(sprintf("  %-8s %6d %12.4f %14.3f %12.3f\n", nm, nrow(d),
+              median(abs(d$beta_pooled)),
+              mean((d$beta_pooled > 0) == (d$beta_ext > 0)),
+              cor(d$beta_pooled, d$beta_ext, method = "spearman")))
+}
+
+# Hub genes are selected FOR co-expression, so they should be far more mutually
+# correlated than lasso genes. Quantifying that says what "hub" means
+# operationally, with no annotation involved.
+cat("\n-- within-set co-expression coherence (ORIEN) --\n")
+oe <- load_expr("data/processed/orien_corrected_preprocessed_v4.csv")
+for (nm in c("hub", "lasso")) {
+  g <- intersect(if (nm == "hub") hub else lasso, rownames(oe))
+  cm <- cor(t(oe[g, , drop = FALSE])); v <- abs(cm[upper.tri(cm)])
+  cat(sprintf("  %-8s n=%3d  mean |r| %.3f  median %.3f  frac>0.5 %.3f\n",
+              nm, length(g), mean(v), median(v), mean(v > 0.5)))
+}
+set.seed(SEED)
+rg <- sample(intersect(universe, rownames(oe)), 300)
+cm <- cor(t(oe[rg, , drop = FALSE])); v <- abs(cm[upper.tri(cm)])
+cat(sprintf("  %-8s n=%3d  mean |r| %.3f  median %.3f  frac>0.5 %.3f\n",
+            "random", length(rg), mean(v), median(v), mean(v > 0.5)))
 
 cat("\n", rep("=", 76), "\n", sep = "")
 cat("HOW TO READ THIS\n")
 cat(rep("=", 76), "\n", sep = "")
-cat("SUPPORTS the housekeeping interpretation:\n")
-cat("  hubs enrich for translation / ribosome / oxidative phosphorylation /\n")
-cat("  RNA processing, AND lasso genes enrich for ECM / hypoxia / EMT / immune.\n\n")
-cat("DOES NOT SUPPORT IT:\n")
-cat("  hubs enrich for nothing, or for tumour-biology terms. In that case the\n")
-cat("  claim is DROPPED and K1.6.7 is reported as a bare trade-off between\n")
-cat("  reproducibility and prognostic content, with no mechanism asserted.\n")
+cat("The housekeeping interpretation is ALREADY REFUTED: hub genes are the most\n")
+cat("variable genes in the universe, not the least. WGCNA needs variance to form\n")
+cat("correlations, so kME selects high-variance genes by construction.\n\n")
+cat("The open question is what coherent high-variance programme hubs represent,\n")
+cat("given they vary strongly yet carry sub-random prognostic signal. If the\n")
+cat("enrichment gives nothing interpretable, assert no mechanism: report K1.6.7\n")
+cat("as a measured trade-off between reproducibility and prognostic content,\n")
+cat("which stands on its own.\n")
 
 cat("\nFinished:", format(Sys.time()), "\n")
 cat("--- sessionInfo ---\n"); print(sessionInfo())
