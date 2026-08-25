@@ -1,15 +1,36 @@
 """
 Data Loader for v4 Pipeline (Phase 2+)
 
-Loads Phase 1 preprocessed data (ComBat-corrected, z-scored, clipped)
-from CSV files produced by phase1_data_preprocessing_v4.R.
+Loads Phase 1 preprocessed data (ComBat-corrected, IQR-filtered, z-scored,
+clipped) from CSV files produced by phase1_data_preprocessing_v4.R.
 
 Input files (in data/processed/):
-    - tcga_preprocessed_v4.csv      : Expression matrix (genes × samples), z-scored
-    - orien_preprocessed_v4.csv     : Expression matrix (genes × samples), z-scored
-    - surv_tcga_aligned_v4.csv      : Survival data (sampleID, time, event)
-    - surv_orien_aligned_v4.csv     : Survival data (sampleID, time, event)
-    - common_genes_v4.txt           : List of 16,353 common genes
+    - tcga_corrected_preprocessed_v4.csv  : genes x samples, IQR-retained, z-scored, clipped
+    - orien_corrected_preprocessed_v4.csv : genes x samples, IQR-retained, z-scored, clipped
+    - surv_tcga_aligned_v4.csv            : sampleID, time, event
+    - surv_orien_aligned_v4.csv           : sampleID, time, event
+    - common_genes_v4.txt                 : 14,675 common genes (post TPM filter)
+
+NOTE ON THE TWO EXPRESSION FILES ON DISK
+----------------------------------------
+`*_corrected_preprocessed_v4.csv` holds the 4,835 IQR-retained genes.
+`*_zscored_full14675_v4.csv` holds the full 14,675-gene universe.
+Both are z-scored and clipped, and a gene present in both has IDENTICAL values
+(z-scoring is per gene, so the filter changes membership, not values -- verified
+max |diff| = 0). The full matrix is retained because Phase G's top ladder row
+needs it. FILE_MAP points at the RETAINED set; anything wanting the full
+universe must ask for it explicitly.
+
+SAMPLE ORDERING (added after audit)
+-----------------------------------
+Downstream code does:
+    X = expr.loc[genes].values.T
+    y = surv['event'].values
+which is only correct if expression COLUMNS and survival ROWS are in the same
+order. The previous version checked set membership and returned both objects
+unsorted, so a reordering anywhere upstream would have silently paired the wrong
+patient with the wrong outcome -- producing plausible but meaningless results.
+load_cohort() now REORDERS survival to expression column order and asserts it.
 
 Usage:
     # Load one cohort
@@ -103,16 +124,36 @@ def load_cohort(
     # Drop any extra unnamed index columns from R export
     survival = survival[['time', 'event']]
 
-    # Validate alignment
-    expr_samples = set(expression.columns)
-    surv_samples = set(survival.index)
-    matched = expr_samples & surv_samples
-
-    if len(matched) < len(expr_samples):
-        logger.warning(
-            f"{cohort.upper()}: {len(matched)}/{len(expr_samples)} expression "
-            f"samples have survival data"
+    # ------------------------------------------------------------------
+    # ENFORCE SAMPLE ORDER -- do not merely check set membership.
+    #
+    # Callers pair expr.values.T row i with surv.iloc[i], so the two must be
+    # in the SAME ORDER, not merely contain the same IDs. Set equality cannot
+    # detect a permutation, and a permutation would pair the wrong patient
+    # with the wrong outcome while every count and shape still looked right.
+    # ------------------------------------------------------------------
+    missing = [s for s in expression.columns if s not in survival.index]
+    if missing:
+        raise ValueError(
+            f"{cohort.upper()}: {len(missing)} expression samples have no "
+            f"survival record (first few: {missing[:5]}). Re-run Phase 1; "
+            f"expression and survival outputs must cover the same patients."
         )
+    extra = [s for s in survival.index if s not in set(expression.columns)]
+    if extra:
+        logger.warning(
+            f"{cohort.upper()}: {len(extra)} survival records have no expression "
+            f"column and are dropped (first few: {extra[:5]})"
+        )
+
+    survival = survival.loc[expression.columns]        # reorder, not just subset
+
+    assert list(expression.columns) == list(survival.index), \
+        f"{cohort}: expression/survival order still mismatched after reindex"
+
+    if survival[['time', 'event']].isna().any().any():
+        n_na = int(survival[['time', 'event']].isna().any(axis=1).sum())
+        raise ValueError(f"{cohort.upper()}: {n_na} samples have NA time/event")
 
     logger.info(
         f"Loaded {cohort.upper()}: {expression.shape[0]} genes × "
@@ -217,20 +258,25 @@ def get_n_features(processed_dir: str = DEFAULT_PROCESSED_DIR) -> int:
     Reads the common genes file.
 
     Returns:
-        Number of common genes (16,353 for v4)
+        Number of common genes (14,675 for v4 -- protein-coding, TPM-filtered,
+        common to both cohorts). NOT the retained IQR set, which is 4,835.
     """
     genes_path = Path(processed_dir) / FILE_MAP['common_genes']
     if genes_path.exists():
         with open(genes_path, 'r') as f:
             n_genes = sum(1 for line in f if line.strip())
         return n_genes
-    else:
-        # Fallback: read header of TCGA expression file
-        expr_path = Path(processed_dir) / FILE_MAP['tcga']['expression']
-        expr = pd.read_csv(expr_path, index_col=0, nrows=0)
-        return len(expr)  # This is n_samples from header, need row count
-        # Actually for genes-as-rows, we need to count rows
-        # Use common_genes file instead
+    # The previous fallback read the header only (nrows=0) and returned
+    # len(expr), which is ALWAYS 0 because no gene rows were read. It also
+    # answered a different question -- the expression matrix holds the RETAINED
+    # genes, not the common-gene universe. Raise instead of returning a wrong
+    # number silently.
+    raise FileNotFoundError(
+        f"Common genes file not found: {genes_path}. This function reports the "
+        f"size of the common-gene universe; for the retained-set size, read "
+        f"data/processed/iqr_filtered_v4_prez/retained_genes.txt, and for a "
+        f"loaded matrix use expression.shape[0]."
+    )
 
 
 def validate_v4_data(processed_dir: str = DEFAULT_PROCESSED_DIR) -> bool:
@@ -327,16 +373,17 @@ def validate_v4_data(processed_dir: str = DEFAULT_PROCESSED_DIR) -> bool:
         ('TCGA', 'tcga_expr', 'surv_tcga'),
         ('ORIEN', 'orien_expr', 'surv_orien')
     ]:
-        expr_samples = set(data[expr_key].columns)
-        surv_samples = set(data[surv_key].index)
-        if expr_samples != surv_samples:
-            missing_in_surv = expr_samples - surv_samples
-            missing_in_expr = surv_samples - expr_samples
-            logger.warning(
-                f"  {cohort_name} sample mismatch: "
-                f"{len(missing_in_surv)} in expr but not surv, "
-                f"{len(missing_in_expr)} in surv but not expr"
+        # load_cohort() now guarantees identical ORDER, not just identical
+        # membership. Check the stronger property here.
+        if list(data[expr_key].columns) != list(data[surv_key].index):
+            logger.error(
+                f"  {cohort_name}: expression columns and survival index are "
+                f"not in the same order -- load_cohort() should have enforced "
+                f"this"
             )
+            all_ok = False
+        else:
+            logger.info(f"  OK: {cohort_name} expression/survival order matches")
 
     if all_ok:
         logger.info("All validation checks passed.")

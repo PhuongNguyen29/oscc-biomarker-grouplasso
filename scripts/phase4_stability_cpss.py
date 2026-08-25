@@ -21,6 +21,25 @@ WHAT CHANGED AND WHY
    to DROP relative to the old grid. Since E(V) scales with q^2, the bound
    should tighten.
 
+1b. RANDOMISED-LASSO WEIGHT DIRECTION -- CORRECTED (audit, August 2026)
+
+   Meinshausen & Buhlmann (2010) Sec 3.1 define the randomised penalty as
+       lambda * sum_j |beta_j| / W_j,   W_j ~ Uniform(weakness, 1)
+   so a gene drawn with a SMALL W_j is penalised MORE, not less. That is the
+   whole mechanism: random extra shrinkage breaks the lasso's tendency to keep
+   the same representative of a correlated group every time.
+
+   Implementing this through an ordinary lasso requires Z = X * W. The previous
+   code used Z = X / W, which yields effective penalty lambda * W_j -- the
+   OPPOSITE direction. Genes given a small weight were shrunk less rather than
+   more.
+
+   Consequence: every CPSS grid, q value, E(V) figure and selected gene set
+   produced before this fix used a randomised lasso with inverted weights. The
+   perturbation was still random, so selection frequencies remained a valid
+   stability DIAGNOSTIC, but they were not the M&B randomised lasso the method
+   section claims, and the numbers change on rerun.
+
 2. ODD-COUNT HANDLING (correctness)
    Old: n_event = int(len(event_idx) * fraction) truncates. At fraction 0.5
         with an odd count, one sample is silently dropped from both halves,
@@ -96,7 +115,13 @@ logging.getLogger('src.data.data_loader').setLevel(logging.WARNING)
 
 N_PAIRS = 50                 # complementary pairs; total fits = N_PAIRS * 2 = 100
 B_FITS = N_PAIRS * 2         # M&B suggest B ~ 100; 25 pairs was undersampled
-SUBSAMPLE_FRACTION = 0.50    # required by CPSS; NOT a tunable
+# CPSS is DEFINED on complementary halves; generate_complementary_pairs() does
+# exact integer half-splitting and does not read this value. It is recorded in
+# summary.json for the audit trail, so it is asserted rather than left as a
+# configurable that would silently change metadata without changing computation.
+SUBSAMPLE_FRACTION = 0.50
+assert SUBSAMPLE_FRACTION == 0.50, \
+    "CPSS requires complementary halves; the sampler does not honour any other value"
 RANDOM_SEED = 42
 DATA_DIR = "data/processed"
 RESULTS_BASE = "results/phase4_cpss"
@@ -360,7 +385,19 @@ def fit_randomized_lasso_cox(X, y_event, y_time, gene_names,
     """
     n_features = X.shape[1]
     weights = rng.uniform(weakness, 1.0, size=n_features)
-    X_scaled = X / weights[np.newaxis, :]
+
+    # ------------------------------------------------------------------
+    # CORRECTED 2026-08: the scaling direction was REVERSED (see docstring).
+    #
+    # M&B randomised penalty:  lambda * sum_j |beta_j| / W_j
+    # To get that from an ordinary lasso, scale Z = X * W. Then with
+    # gamma = beta / W:   Z gamma = X W (beta/W) = X beta, and the ordinary
+    # penalty lambda*sum|gamma_j| equals lambda*sum |beta_j| / W_j.
+    #
+    # The previous code used Z = X / W, which gives effective penalty
+    # lambda * W_j -- so small W_j meant LESS shrinkage instead of more.
+    # ------------------------------------------------------------------
+    X_scaled = X * weights[np.newaxis, :]
 
     y_struct = np.array(
         [(bool(e), t) for e, t in zip(y_event, y_time)],
@@ -392,8 +429,11 @@ def fit_randomized_lasso_cox(X, y_event, y_time, gene_names,
     if nonconverged:
         return [], {}, 0, "nonconverged"
 
+    # gamma (fitted on Z = X*W) maps back to beta via beta = gamma * W,
+    # matching the substitution above. The previous version divided, which was
+    # the inverse of its own (also reversed) scaling.
     coefs_scaled = model.coef_[:, 0]
-    coefs_original = coefs_scaled / weights
+    coefs_original = coefs_scaled * weights
 
     nonzero = np.abs(coefs_scaled) > 1e-10
     selected = [gene_names[j] for j in range(n_features) if nonzero[j]]
@@ -543,6 +583,11 @@ def run_stability_for_cohort(cohort, X, y_event, y_time, gene_names,
 # =============================================================================
 # Frozen selection rule (A4.5)
 # =============================================================================
+
+def prob_dir_for(results_dir):
+    """Where run_stability_for_cohort writes per-cell selection probabilities."""
+    return results_dir / "selection_probabilities"
+
 
 def select_operating_point(grid, ev_target, bound_key):
     """
@@ -780,6 +825,36 @@ if __name__ == "__main__":
         ).to_csv(results_dir / "union_gene_set.csv", index=False)
         with open(results_dir / "union_genes.txt", 'w') as f:
             f.write("\n".join(selected['union_genes']) + "\n")
+
+        # ------------------------------------------------------------------
+        # CANONICAL SELECTED-CELL ARTIFACT (added after audit).
+        #
+        # Downstream scripts (K1.6.4, K1.6.7, K1.6.8, K3) previously located the
+        # lasso comparator with a filename pattern -- "^tcga.*mult0p80" -- which
+        # hard-codes an operating point the A4.5 rule is supposed to CHOOSE.
+        # Nothing guaranteed the rule selected 0.80, so the "lasso" comparator
+        # was not necessarily the selected one.
+        #
+        # Phase 4 now writes the selected cell's selection probabilities under a
+        # fixed name. Downstream code reads these and never reconstructs the
+        # operating point from a filename.
+        # ------------------------------------------------------------------
+        sel_tag = f"mult{selected['mult']:.2f}".replace(".", "p")
+        for coh in ('tcga', 'orien'):
+            src = prob_dir_for(results_dir) / f"{coh}_selection_probs_{sel_tag}.csv"
+            dst = results_dir / f"selected_{coh}_selection_probabilities.csv"
+            if src.exists():
+                pd.read_csv(src, index_col=0).to_csv(dst)
+        with open(results_dir / "selected_cell.json", 'w') as f:
+            json.dump({'mult': selected['mult'], 'pi': selected['pi'],
+                       'ev_target': EV_TARGET, 'bound': PRIMARY_BOUND,
+                       'n_tcga_stable': selected['n_tcga_stable'],
+                       'n_orien_stable': selected['n_orien_stable'],
+                       'n_union': len(selected['union_genes']),
+                       'rule': 'A4.5 lowest pi, then smallest multiplier'},
+                      f, indent=2)
+        logger.info(f"  Canonical artifacts written: selected_cell.json, "
+                    f"selected_{{tcga,orien}}_selection_probabilities.csv")
 
     # --- Summary ------------------------------------------------------------
     summary = {
