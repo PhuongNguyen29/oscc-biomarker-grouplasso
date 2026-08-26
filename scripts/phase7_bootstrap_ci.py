@@ -63,7 +63,11 @@ def subset_in_order(expr_df, gene_names):
     missing = [g for g in gene_names if g not in expr_df.index]
     if missing:
         raise ValueError(f"{len(missing)} model genes absent from expression: {missing}")
-    return expr_df.loc[gene_names].values.T.astype(np.float64)  # samples x genes
+    # float32, NOT float64: Phase 7 cast its design matrices to float32
+    # (phase7_bidirectional_percohort.py lines 617/622). Rebuilding in float64
+    # perturbs predictions at ~1e-7, which flips ~1 tied/near-tied pair and
+    # moves the C-index by ~5e-6 -- enough to trip the provenance gate.
+    return expr_df.loc[gene_names].values.T.astype(np.float32)  # samples x genes
 
 
 def bootstrap_cindex(event, time, pred, n_boot, rng):
@@ -107,8 +111,10 @@ def process_direction(run_dir, direction, cohorts, n_boot, seed, recorded):
     test_cohort = TEST_COHORT[direction]
     expr, surv = cohorts[test_cohort]
     X_test = subset_in_order(expr, gene_names)
-    event = surv["event"].values.astype(bool)
-    time = surv["time"].values.astype(float)
+    # Reproduce Phase 7's float32 round-trip for event/time as well, so tie
+    # structure in survival times is byte-identical to the recorded run.
+    event = surv["event"].values.astype(np.float32).astype(bool)
+    time = surv["time"].values.astype(np.float32).astype(float)
 
     pred = model.predict(X_test, alpha=best_alpha)
 
