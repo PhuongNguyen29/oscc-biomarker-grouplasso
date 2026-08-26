@@ -88,7 +88,7 @@ def bootstrap_cindex(event, time, pred, n_boot, rng):
 
 
 def process_direction(run_dir, direction, cohorts, n_boot, seed, recorded):
-    model_file = run_dir / "cox_validation" / f"cox_model_{direction}.pkl"
+    model_file = run_dir / "cox" / f"cox_model_{direction}.pkl"
     if not model_file.exists():
         # Phase 7 may write directly under the run dir depending on version
         alt = run_dir / f"cox_model_{direction}.pkl"
