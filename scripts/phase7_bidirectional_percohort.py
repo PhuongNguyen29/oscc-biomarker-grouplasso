@@ -663,46 +663,64 @@ def main():
     logger.info("\n  Direction 1: TCGA → ORIEN")
     logger.info(f"  Using {len(stable_genes['tcga'])} TCGA-stable genes")
 
-    tcga_X_tcga_genes = subset_expression(tcga_X_full, all_gene_names, stable_genes['tcga'])
-    orien_X_tcga_genes = subset_expression(orien_X_full, all_gene_names, stable_genes['tcga'])
+    # GUARD (2026-08): at the SS-primary CPSS cell TCGA has 0 stable genes.
+    # An empty design matrix cannot be fit; record the direction as not
+    # evaluable rather than crashing. This is a reportable finding.
+    if len(stable_genes['tcga']) == 0:
+        logger.warning("  Direction 1 NOT EVALUABLE: 0 TCGA-stable genes at this cell.")
+        d1_train_ci = d1_test_ci = d1_alpha = None
+        d1_nz = 0
+    else:
+        tcga_X_tcga_genes = subset_expression(tcga_X_full, all_gene_names, stable_genes['tcga'])
+        orien_X_tcga_genes = subset_expression(orien_X_full, all_gene_names, stable_genes['tcga'])
 
-    d1_train_ci, d1_test_ci, d1_nz, d1_alpha, d1_coefs = train_and_evaluate_cox(
-        X_train=tcga_X_tcga_genes,
-        y_event_train=tcga_event, y_time_train=tcga_time, train_ids=tcga_ids,
-        X_test=orien_X_tcga_genes,
-        y_event_test=orien_event, y_time_test=orien_time, test_ids=orien_ids,
-        l1_ratio=COX_PARAMS['tcga']['l1_ratio'],
-        gene_names=stable_genes['tcga'],
-        direction_label="tcga_to_orien",
-        out_dir=cox_dir,
-    )
+        d1_train_ci, d1_test_ci, d1_nz, d1_alpha, d1_coefs = train_and_evaluate_cox(
+            X_train=tcga_X_tcga_genes,
+            y_event_train=tcga_event, y_time_train=tcga_time, train_ids=tcga_ids,
+            X_test=orien_X_tcga_genes,
+            y_event_test=orien_event, y_time_test=orien_time, test_ids=orien_ids,
+            l1_ratio=COX_PARAMS['tcga']['l1_ratio'],
+            gene_names=stable_genes['tcga'],
+            direction_label="tcga_to_orien",
+            out_dir=cox_dir,
+        )
 
     # --- Direction 2: ORIEN → TCGA ---
     logger.info("\n  Direction 2: ORIEN → TCGA")
     logger.info(f"  Using {len(stable_genes['orien'])} ORIEN-stable genes")
 
-    orien_X_orien_genes = subset_expression(orien_X_full, all_gene_names, stable_genes['orien'])
-    tcga_X_orien_genes = subset_expression(tcga_X_full, all_gene_names, stable_genes['orien'])
+    if len(stable_genes['orien']) == 0:
+        logger.warning("  Direction 2 NOT EVALUABLE: 0 ORIEN-stable genes at this cell.")
+        d2_train_ci = d2_test_ci = d2_alpha = None
+        d2_nz = 0
+    else:
+        orien_X_orien_genes = subset_expression(orien_X_full, all_gene_names, stable_genes['orien'])
+        tcga_X_orien_genes = subset_expression(tcga_X_full, all_gene_names, stable_genes['orien'])
 
-    d2_train_ci, d2_test_ci, d2_nz, d2_alpha, d2_coefs = train_and_evaluate_cox(
-        X_train=orien_X_orien_genes,
-        y_event_train=orien_event, y_time_train=orien_time, train_ids=orien_ids,
-        X_test=tcga_X_orien_genes,
-        y_event_test=tcga_event, y_time_test=tcga_time, test_ids=tcga_ids,
-        l1_ratio=COX_PARAMS['orien']['l1_ratio'],
-        gene_names=stable_genes['orien'],
-        direction_label="orien_to_tcga",
-        out_dir=cox_dir,
-    )
+        d2_train_ci, d2_test_ci, d2_nz, d2_alpha, d2_coefs = train_and_evaluate_cox(
+            X_train=orien_X_orien_genes,
+            y_event_train=orien_event, y_time_train=orien_time, train_ids=orien_ids,
+            X_test=tcga_X_orien_genes,
+            y_event_test=tcga_event, y_time_test=tcga_time, test_ids=tcga_ids,
+            l1_ratio=COX_PARAMS['orien']['l1_ratio'],
+            gene_names=stable_genes['orien'],
+            direction_label="orien_to_tcga",
+            out_dir=cox_dir,
+        )
 
-    cox_mean_test = (d1_test_ci + d2_test_ci) / 2
+    def _fmt(v):
+        return "n/a" if v is None else f"{v:.4f}"
+
+    _eval_cis = [ci for ci in (d1_test_ci, d2_test_ci) if ci is not None]
+    cox_mean_test = float(np.mean(_eval_cis)) if _eval_cis else None
 
     logger.info(f"\n  Cox Summary:")
-    logger.info(f"    TCGA→ORIEN: train={d1_train_ci:.4f}, test={d1_test_ci:.4f} "
+    logger.info(f"    TCGA->ORIEN: train={_fmt(d1_train_ci)}, test={_fmt(d1_test_ci)} "
                 f"({len(stable_genes['tcga'])} genes)")
-    logger.info(f"    ORIEN→TCGA: train={d2_train_ci:.4f}, test={d2_test_ci:.4f} "
+    logger.info(f"    ORIEN->TCGA: train={_fmt(d2_train_ci)}, test={_fmt(d2_test_ci)} "
                 f"({len(stable_genes['orien'])} genes)")
-    logger.info(f"    Mean test C-index: {cox_mean_test:.4f}")
+    logger.info(f"    Mean test C-index over evaluable directions ({len(_eval_cis)}): "
+                f"{_fmt(cox_mean_test)}")
 
     # =========================================================================
     # DeepSurv Bidirectional Validation (union gene set + IG)
@@ -798,19 +816,22 @@ def main():
         "cox_validation": {
             "tcga_to_orien": {
                 "n_genes": len(stable_genes['tcga']),
-                "train_ci": float(d1_train_ci),
-                "test_ci": float(d1_test_ci),
+                "evaluable": d1_test_ci is not None,
+                "train_ci": None if d1_train_ci is None else float(d1_train_ci),
+                "test_ci": None if d1_test_ci is None else float(d1_test_ci),
                 "n_nonzero": d1_nz,
-                "best_alpha": float(d1_alpha),
+                "best_alpha": None if d1_alpha is None else float(d1_alpha),
             },
             "orien_to_tcga": {
                 "n_genes": len(stable_genes['orien']),
-                "train_ci": float(d2_train_ci),
-                "test_ci": float(d2_test_ci),
+                "evaluable": d2_test_ci is not None,
+                "train_ci": None if d2_train_ci is None else float(d2_train_ci),
+                "test_ci": None if d2_test_ci is None else float(d2_test_ci),
                 "n_nonzero": d2_nz,
-                "best_alpha": float(d2_alpha),
+                "best_alpha": None if d2_alpha is None else float(d2_alpha),
             },
-            "mean_test_ci": float(cox_mean_test),
+            "mean_test_ci": None if cox_mean_test is None else float(cox_mean_test),
+            "n_evaluable_directions": len(_eval_cis),
         },
         "deepsurv_validation": ds_results,
         "config": {
@@ -836,10 +857,10 @@ def main():
                 f"overlap={len(stable_genes['overlap'])}")
     logger.info(f"\n  Cox bidirectional validation:")
     logger.info(f"    TCGA→ORIEN ({len(stable_genes['tcga'])} genes): "
-                f"test C-index = {d1_test_ci:.4f}")
+                f"test C-index = {_fmt(d1_test_ci)}")
     logger.info(f"    ORIEN→TCGA ({len(stable_genes['orien'])} genes): "
-                f"test C-index = {d2_test_ci:.4f}")
-    logger.info(f"    Mean test C-index: {cox_mean_test:.4f}")
+                f"test C-index = {_fmt(d2_test_ci)}")
+    logger.info(f"    Mean test C-index: {_fmt(cox_mean_test)}")
 
     if ds_results:
         logger.info(f"\n  DeepSurv bidirectional validation (union {len(stable_genes['union'])} genes):")
