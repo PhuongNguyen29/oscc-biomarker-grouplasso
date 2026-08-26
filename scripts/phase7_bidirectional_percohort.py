@@ -121,25 +121,32 @@ def load_phase2_deepsurv_params(phase2_dir="results/phase2_tuning"):
     }
 
 
-def load_phase2_cox_params(phase2_dir="results/phase2_tuning"):
-    """Load best Cox hyperparameters from Phase 2."""
-    phase2_path = Path(phase2_dir)
-    tuning_dirs = sorted(phase2_path.glob("cox_tuning_*"))
-    if not tuning_dirs:
-        raise FileNotFoundError(f"No cox tuning results found in {phase2_path}")
-    latest = tuning_dirs[-1]
-    results_file = latest / "all_results.json"
-    with open(results_file) as f:
-        all_results = json.load(f)
-    logger.info(f"Loaded Cox Phase 2 params from: {results_file}")
-    return {
-        cohort: {
-            'l1_ratio': all_results[cohort]['best_l1_ratio'],
-            'alpha': all_results[cohort].get('actual_path_alpha',
-                     all_results[cohort].get('recommended_alpha')),
+def load_phase2_cox_params(tcga_path, orien_path):
+    """Load best Cox hyperparameters from Phase 2, per-cohort files.
+
+    FIXED (2026-08): the previous version globbed cox_tuning_* and took the
+    LATEST directory, assuming it held both cohorts. The corrected Phase 2
+    runs are one directory per cohort, so the newest held only one cohort
+    (KeyError on the other). Explicit per-cohort paths also make Phase 7's
+    provenance identical to the CPSS anchors.
+    """
+    out = {}
+    for cohort, path in (('tcga', tcga_path), ('orien', orien_path)):
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Phase 2 Cox params not found for {cohort}: {path}")
+        with open(path) as f:
+            p2 = json.load(f)
+        l1 = p2.get('best_l1_ratio')
+        if l1 is None:
+            raise ValueError(f"{cohort}: best_l1_ratio missing in {path}")
+        out[cohort] = {
+            'l1_ratio': l1,
+            'alpha': p2.get('actual_path_alpha', p2.get('recommended_alpha')),
         }
-        for cohort in ['tcga', 'orien']
-    }
+        logger.info(f"Loaded Cox Phase 2 params ({cohort.upper()}): "
+                    f"l1_ratio={l1} from {path}")
+    return out
 
 
 # =============================================================================
@@ -555,6 +562,16 @@ def main():
         '--cox-only', action='store_true',
         help="Run Cox validation only (skip DeepSurv)"
     )
+    parser.add_argument(
+        '--phase2-cox-tcga', type=str,
+        default='results/phase2_tuning/cox_tuning_20260804_231755/tcga_best_params.json',
+        help="TCGA Phase 2 Cox best_params.json (same file as the CPSS anchor)"
+    )
+    parser.add_argument(
+        '--phase2-cox-orien', type=str,
+        default='results/phase2_tuning/cox_tuning_20260804_225946/orien_best_params.json',
+        help="ORIEN Phase 2 Cox best_params.json (same file as the CPSS anchor)"
+    )
     args = parser.parse_args()
 
     start_time = time.time()
@@ -646,8 +663,10 @@ def main():
     union_df.to_csv(results_dir / "union_gene_set.csv", index=False)
 
     # Load Phase 2 params
-    COX_PARAMS = load_phase2_cox_params()
-    DEEPSURV_PARAMS = load_phase2_deepsurv_params()
+    COX_PARAMS = load_phase2_cox_params(args.phase2_cox_tcga, args.phase2_cox_orien)
+    # DeepSurv params are only needed when DeepSurv actually runs; loading them
+    # under --cox-only would re-introduce the glob-latest failure for no reason.
+    DEEPSURV_PARAMS = None if args.cox_only else load_phase2_deepsurv_params()
 
     # =========================================================================
     # Cox Bidirectional Validation (per-cohort gene sets)
