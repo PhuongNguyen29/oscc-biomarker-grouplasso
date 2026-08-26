@@ -71,6 +71,13 @@ logging.getLogger('src.data.data_loader').setLevel(logging.WARNING)
 # =============================================================================
 
 B_SUBSAMPLES = 50
+# Fraction 0.80 is a DELIBERATE departure from M&B/Shah-Samworth, which both
+# derive their bounds for half-samples. At fraction 0.8 NO error bound applies
+# under either theory, and none is claimed: this arm reports selection
+# FREQUENCIES only (He & Yu 2010, Table 1 -- data-perturbation ensemble feature
+# selection). The methods text must say so explicitly rather than citing M&B
+# Theorem 1. The complementary-pairs arm (phase4_stability_cpss.py) is the
+# error-controlled comparison.
 SUBSAMPLE_FRACTION = 0.80
 RANDOM_SEED = 42
 DATA_DIR = "data/processed"
@@ -78,6 +85,9 @@ RESULTS_BASE = "results/phase4_stability_randomized_lasso"
 
 # Stability thresholds
 PI_THRESHOLDS = [0.60, 0.70, 0.80, 0.90]
+# NOT a selection rule. This script enumerates the grid and applies no
+# criterion; PI_PRIMARY only controls which threshold is echoed in the summary.
+# The operating point was historically chosen by inspection (plan A4.1).
 PI_PRIMARY = 0.80
 
 # Phase 2 Cox parameters (lasso)
@@ -178,9 +188,24 @@ def fit_randomized_lasso_cox(
     # Draw random weights W_j ~ Uniform(weakness, 1.0)
     weights = rng.uniform(weakness, 1.0, size=n_features)
 
-    # Scale columns: X_scaled[:, j] = X_train[:, j] / W_j
-    # This makes effective penalty = alpha * W_j for gene j
-    X_scaled = X_train / weights[np.newaxis, :]
+    # ------------------------------------------------------------------
+    # CORRECTED 2026-08 (audit): the scaling direction was REVERSED.
+    #
+    # M&B (2010) Sec 3.1 randomised penalty:  alpha * sum_j |beta_j| / W_j
+    # With W_j ~ U(weakness, 1), a SMALL W_j means MORE shrinkage. That is the
+    # mechanism: extra random shrinkage stops the lasso repeatedly keeping the
+    # same representative of a correlated group.
+    #
+    # To obtain that from an ordinary lasso, scale Z = X * W. Substituting
+    # gamma = beta / W gives Z gamma = X beta and penalty alpha*sum|gamma_j| =
+    # alpha*sum |beta_j| / W_j -- exactly the M&B objective.
+    #
+    # The previous line was X / W, whose effective penalty is alpha * W_j (as
+    # its own comment stated) -- the opposite direction, so low-weight genes
+    # were shrunk LESS. Verified numerically: the old scaling does not solve
+    # the M&B problem (objective mismatch 0.19 on a synthetic check).
+    # ------------------------------------------------------------------
+    X_scaled = X_train * weights[np.newaxis, :]
 
     # Build structured survival array
     y_struct = np.array(
@@ -189,33 +214,35 @@ def fit_randomized_lasso_cox(
     )
 
     # Fit lasso Cox
-    current_alpha = alpha
-    for attempt in range(5):
+    # Retrying at a doubled alpha would place this fit at a DIFFERENT penalty
+    # from the rest of the cell, so q would mix fits from different alphas.
+    # Record the failure instead. Convergence is also captured explicitly:
+    # coordinate descent returns a partially optimised path at max_iter WITHOUT
+    # raising, and unconverged paths are less sparse, which inflates q.
+    import warnings as _warnings
+    model = CoxnetSurvivalAnalysis(
+        l1_ratio=l1_ratio, alphas=[alpha], normalize=False,
+        tol=1e-7, max_iter=100000,
+    )
+    with _warnings.catch_warnings(record=True) as _caught:
+        _warnings.simplefilter("always")
         try:
-            model = CoxnetSurvivalAnalysis(
-                l1_ratio=l1_ratio,
-                alphas=[current_alpha],
-                normalize=False,
-                tol=1e-7,
-                max_iter=100000,
-            )
             model.fit(X_scaled, y_struct)
-            break
         except ArithmeticError:
-            current_alpha = current_alpha * 2
-            if attempt == 4:
-                logger.warning(f"    Lasso fit failed after 5 attempts, alpha={current_alpha}")
-                return [], {}, 0, weights
+            logger.warning(f"    Lasso fit failed (ArithmeticError) at alpha={alpha}")
+            return [], {}, 0, weights
+    if any(w.category.__name__ == "ConvergenceWarning"
+           or "terminated early" in str(w.message).lower() for w in _caught):
+        logger.warning(f"    Lasso did not converge at alpha={alpha}; fit discarded")
+        return [], {}, 0, weights
 
-    # Get coefficients (on scaled data)
-    # Note: coefficients are for X_scaled, but since X_scaled[:, j] = X[:, j] / W_j,
-    # the effective coefficient for original gene j is coef_scaled[j] / W_j.
-    # For selection purposes (nonzero/zero), this doesn't matter —
-    # a gene is selected if and only if its scaled coefficient is nonzero.
+    # Coefficients are fitted on Z = X * W. The substitution above was
+    # gamma = beta / W, so beta = gamma * W. The previous code DIVIDED, which
+    # was the inverse of its own (already reversed) scaling -- so signed
+    # coefficients were doubly wrong. Selection (nonzero vs zero) is unaffected
+    # by a positive rescaling, but the reported signs and magnitudes were not.
     raw_coefs_scaled = model.coef_[:, 0]
-
-    # Transform back to original scale for sign interpretation
-    raw_coefs_original = raw_coefs_scaled / weights
+    raw_coefs_original = raw_coefs_scaled * weights
 
     # Identify selected genes (nonzero coefficients)
     nonzero_mask = np.abs(raw_coefs_scaled) > 1e-10
@@ -409,7 +436,7 @@ if __name__ == "__main__":
         description="Phase 4: Randomized Lasso Stability Selection (Cox Only)"
     )
     parser.add_argument(
-        '--filter-dir', type=str, default='iqr_filtered',
+        '--filter-dir', type=str, default='iqr_filtered_v4_prez',
         help="Subdirectory under data/processed/ with retained_genes.txt"
     )
     parser.add_argument(

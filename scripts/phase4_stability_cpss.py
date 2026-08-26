@@ -3,8 +3,36 @@ Phase 4: Stability Selection with Randomized Lasso — Complementary Pairs (CPSS
 
 Revision of phase4_stability_randomized_lasso.py for the corrected pipeline.
 
-WHAT CHANGED AND WHY
---------------------
+CHANGELOG
+---------
+rev 2026-08 (b) — SELECTION-RULE ORDERING CORRECTED (metadata-only revision)
+    * select_operating_point() now orders admissible cells by (pi, mult):
+      LOWEST pi first, ties broken by SMALLEST alpha multiplier — matching
+      plan A4.5 (CORRECTED). The previous code ordered (mult, pi), the
+      superseded draft rule, which forces pi to its admissible maximum and
+      selected a zero-gene cell.
+    * Both orderings are computed and written to summary.json; the
+      multiplier-first selection is labelled SUPERSEDED and is reported for
+      transparency only.
+    * The stale docstring inside fit_randomized_lasso_cox() (which still
+      described the pre-audit X/W scaling) is corrected to match the code.
+    * NO fitting behaviour changes in this revision. Subsampling, weights,
+      fits, selection probabilities, q, and E(V) are byte-identical to the
+      recorded phase4_cpss_FINAL run. Verify by re-running the rule against
+      the recorded summary.json grid (no refit needed).
+
+    DEFERRED to a versioned v2, ONLY if CPSS is ever refit (these change
+    outputs and must not be mixed into a metadata revision):
+      - cohort-specific RNG seeds for weights and subsampling (current code
+        couples the random perturbation across cohorts; directionally this
+        can only inflate cross-cohort agreement, so the recorded
+        zero-overlap finding is conservative — disclosed in methods)
+      - float64 design matrices instead of float32
+      - stratified-halves + continuous-Uniform-weight labelling caveats in
+        the summary 'method' string (see methods text)
+
+WHAT CHANGED AND WHY (rev 2026-08 a, unchanged below)
+-----------------------------------------------------
 1. SUBSAMPLING DESIGN (substantive)
    Old: B independent stratified subsamples at fraction 0.80.
    New: B/2 complementary PAIRS of disjoint stratified half-samples
@@ -66,10 +94,19 @@ WHAT CHANGED AND WHY
    Now points at the corrected post-ComBat pre-z filter output, not the
    frozen old post-z set.
 
-FROZEN SELECTION RULE (B / A4.5)
---------------------------------
+FROZEN SELECTION RULE (B / A4.5 -- CORRECTED)
+---------------------------------------------
 Among cells satisfying E(V) <= EV_TARGET in BOTH cohorts, select the one with
-the smallest alpha multiplier; ties broken by the lowest pi threshold.
+the LOWEST pi threshold; ties broken by the SMALLEST alpha multiplier.
+
+Rationale (recorded in plan A4.5): pi is the stability threshold M&B treat as
+primary; the multiplier is secondary. The rule as originally drafted ordered
+by multiplier first, which is inconsistent with its own written rationale
+("largest admissible gene set subject to the error guarantee") -- multiplier-
+first forces pi to its admissible maximum, and stable counts fall with pi, so
+it selected a zero-gene cell. Both orderings' selections are reported in
+summary.json; pi-first is primary.
+
 No test-cohort C-index, no external validation result, and no gene-set size
 enters this rule. If no cell is admissible, that is the reported result; the
 target is not relaxed.
@@ -361,8 +398,12 @@ def fit_randomized_lasso_cox(X, y_event, y_time, gene_names,
     """
     Fit lasso Cox with randomized penalty weights on one half-sample.
 
-    Randomization (M&B 2010 Section 3.1): draw W_j ~ Uniform(weakness, 1),
-    scale column j by 1/W_j, so the effective penalty on gene j is alpha*W_j.
+    Randomization (M&B 2010 Section 3.1): draw W_j ~ Uniform(weakness, 1)
+    and fit an ordinary lasso to Z_j = X_j * W_j. This is equivalent to an
+    effective penalty alpha * |beta_j| / W_j on the original scale, so a
+    SMALLER W_j means STRONGER penalization. (Docstring corrected 2026-08b:
+    the previous text described the pre-audit 1/W_j scaling, contradicting
+    the code below.)
 
     CONVERGENCE HANDLING
     --------------------
@@ -581,7 +622,7 @@ def run_stability_for_cohort(cohort, X, y_event, y_time, gene_names,
 
 
 # =============================================================================
-# Frozen selection rule (A4.5)
+# Frozen selection rule (A4.5 -- corrected)
 # =============================================================================
 
 def prob_dir_for(results_dir):
@@ -589,16 +630,27 @@ def prob_dir_for(results_dir):
     return results_dir / "selection_probabilities"
 
 
-def select_operating_point(grid, ev_target, bound_key):
+def select_operating_point(grid, ev_target, bound_key, ordering="pi_first"):
     """
-    Apply the frozen A4.5 rule.
+    Apply the frozen A4.5 rule (CORRECTED ordering).
 
-    Among cells with E(V) <= ev_target in BOTH cohorts, take the smallest
-    alpha multiplier; ties broken by the lowest pi.
+    PRIMARY (ordering="pi_first"): among cells with E(V) <= ev_target in BOTH
+    cohorts, take the LOWEST pi; ties broken by the SMALLEST alpha multiplier.
+    This is the rule recorded in plan A4.5 (corrected). pi is the stability
+    threshold M&B treat as primary; the multiplier is secondary.
 
-    grid: list of dicts with mult, pi, ev_tcga, ev_orien
+    SUPERSEDED (ordering="mult_first"): the originally drafted ordering --
+    smallest multiplier first, then lowest pi. Inconsistent with the rule's
+    own written rationale: it forces pi to its admissible maximum, where
+    stable counts approach zero. Computed only so both orderings can be
+    reported, per the plan's disclosure commitment. NOT used for selection.
+
+    grid: list of dicts with mult, pi, estimable, ev_tcga_*, ev_orien_*
     Returns the selected cell dict, or None if no cell is admissible.
     """
+    if ordering not in ("pi_first", "mult_first"):
+        raise ValueError(f"Unknown ordering '{ordering}'")
+
     admissible = [
         c for c in grid
         if c.get('estimable')
@@ -609,7 +661,12 @@ def select_operating_point(grid, ev_target, bound_key):
     ]
     if not admissible:
         return None
-    admissible.sort(key=lambda c: (c['mult'], c['pi']))
+
+    if ordering == "pi_first":
+        admissible.sort(key=lambda c: (c['pi'], c['mult']))
+    else:  # mult_first -- superseded, reporting only
+        admissible.sort(key=lambda c: (c['mult'], c['pi']))
+
     return admissible[0]
 
 
@@ -643,7 +700,7 @@ if __name__ == "__main__":
     logger.info("Phase 4: CPSS Randomized Lasso Stability Selection")
     logger.info(f"Results: {results_dir}")
     logger.info(f"EV_TARGET={EV_TARGET}, PRIMARY_BOUND={PRIMARY_BOUND}")
-    
+
     # --- Load ---------------------------------------------------------------
     tcga_expr, tcga_surv = load_cohort('tcga', DATA_DIR)
     orien_expr, orien_surv = load_cohort('orien', DATA_DIR)
@@ -797,11 +854,25 @@ if __name__ == "__main__":
     # --- Apply the frozen rule ---------------------------------------------
     logger.info("")
     logger.info("=" * 70)
-    logger.info(f"FROZEN SELECTION RULE (A4.5): E(V) <= {EV_TARGET} in both "
-                f"cohorts, bound = {PRIMARY_BOUND}")
+    logger.info(f"FROZEN SELECTION RULE (A4.5 corrected): E(V) <= {EV_TARGET} "
+                f"in both cohorts, bound = {PRIMARY_BOUND}; "
+                f"lowest pi, ties by smallest multiplier")
     logger.info("=" * 70)
 
-    selected = select_operating_point(grid, EV_TARGET, PRIMARY_BOUND)
+    selected = select_operating_point(grid, EV_TARGET, PRIMARY_BOUND,
+                                      ordering="pi_first")
+
+    # Superseded multiplier-first ordering: computed and reported per the
+    # plan's disclosure commitment ("Both orderings' selections are reported"),
+    # never used for selection or downstream artifacts.
+    selected_multfirst = select_operating_point(grid, EV_TARGET, PRIMARY_BOUND,
+                                                ordering="mult_first")
+    if selected_multfirst is not None:
+        logger.info(f"  [superseded mult-first ordering would select: "
+                    f"mult={selected_multfirst['mult']}, "
+                    f"pi={selected_multfirst['pi']:.2f}, "
+                    f"union={len(selected_multfirst['union_genes'])} genes "
+                    f"-- reported only, not adopted]")
 
     if selected is None:
         logger.info("  NO ADMISSIBLE CELL. Reported as the result; target not relaxed.")
@@ -851,7 +922,7 @@ if __name__ == "__main__":
                        'n_tcga_stable': selected['n_tcga_stable'],
                        'n_orien_stable': selected['n_orien_stable'],
                        'n_union': len(selected['union_genes']),
-                       'rule': 'A4.5 lowest pi, then smallest multiplier'},
+                       'rule': 'A4.5 (corrected): lowest pi, then smallest multiplier'},
                       f, indent=2)
         logger.info(f"  Canonical artifacts written: selected_cell.json, "
                     f"selected_{{tcga,orien}}_selection_probabilities.csv")
@@ -867,9 +938,15 @@ if __name__ == "__main__":
             'Shah & Samworth (2013) JRSS-B 75:55-80',
         ],
         'selection_rule': (
-            f'Frozen A4.5: among cells with E(V) <= {EV_TARGET} in BOTH cohorts, '
-            f'smallest alpha multiplier; ties broken by lowest pi. '
+            f'Frozen A4.5 (corrected): among cells with E(V) <= {EV_TARGET} in '
+            f'BOTH cohorts, lowest pi; ties broken by smallest alpha multiplier. '
             f'No performance quantity enters this rule.'
+        ),
+        'selection_rule_history': (
+            'The originally drafted ordering (smallest multiplier first, then '
+            'lowest pi) was inconsistent with its own rationale and selected a '
+            'zero-gene cell; corrected per plan A4.5. Both orderings are '
+            'reported: see selected_cell and selected_cell_multfirst_superseded.'
         ),
         'ev_target': EV_TARGET,
         'primary_bound': PRIMARY_BOUND,
@@ -891,6 +968,19 @@ if __name__ == "__main__":
         },
         'grid': grid,
         'selected_cell': selected,
+        'selected_cell_multfirst_superseded': (
+            None if selected_multfirst is None else {
+                'mult': selected_multfirst['mult'],
+                'pi': selected_multfirst['pi'],
+                'ev_tcga': selected_multfirst[f'ev_tcga_{PRIMARY_BOUND}'],
+                'ev_orien': selected_multfirst[f'ev_orien_{PRIMARY_BOUND}'],
+                'n_tcga_stable': selected_multfirst['n_tcga_stable'],
+                'n_orien_stable': selected_multfirst['n_orien_stable'],
+                'n_union': len(selected_multfirst['union_genes']),
+                'note': ('Superseded ordering (mult, pi); reported for '
+                         'disclosure only, never adopted.'),
+            }
+        ),
     }
     with open(results_dir / "summary.json", 'w') as f:
         json.dump(summary, f, indent=2, default=str)
