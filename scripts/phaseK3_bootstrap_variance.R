@@ -286,7 +286,7 @@ for (ref in c("TCGA", "ORIEN")) {
   cohorts <- names(X)
   ve <- sapply(cohorts, function(co) {
     v <- VE_by[[paste(ref, co)]]
-    setNames(as.numeric(v[[1]]), rownames(v))
+    setNames(as.numeric(v[1, ]), sub("^ME", "", colnames(v)))
   })
   if (is.null(dim(ve))) next
   cat(sprintf("  %-12s %8s %8s %10s %10s %10s\n", "module", "TCGA", "ORIEN",
