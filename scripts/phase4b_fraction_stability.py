@@ -4,6 +4,46 @@ Phase 4b: Subsampling-fraction stability sweep
 Measures how selection stability depends on subsample fraction, per cohort,
 and produces the fraction-0.8 gene sets alongside.
 
+CHANGELOG
+---------
+rev 2026-08 (b) -- WEIGHT DIRECTION + SEED DECOUPLING (behaviour-changing)
+    Supersedes the run that produced the recorded fraction-stability table
+    (plan section D5). Three defects fixed; ALL NUMBERS CHANGE ON RERUN:
+
+    1. RANDOMISED-LASSO WEIGHT DIRECTION. fit_one used Z = X / W -- the same
+       inverted direction fixed in the CPSS script (phase4_cpss RULEFIX,
+       plan D2b). M&B (2010) Sec 3.1 penalise lambda * |beta_j| / W_j, which an
+       ordinary lasso realises via Z = X * W (substitute gamma = beta / W).
+       Division gives the OPPOSITE: small-W genes were shrunk LESS. Corrected
+       to Z = X * W. Empirically (D2b), the corrected direction also SHRINKS
+       columns (W <= 1), improving conditioning and sparsity.
+
+    2. RANKING SCALE. Top-k sets for Kuncheva proper were ranked by |gamma|
+       (coefficients on the scaled design), which mixes the random weights
+       into the ranking. Coefficients are now back-transformed to the original
+       scale (beta = gamma * W) before ranking. The SELECTED SET is unchanged
+       by this (W > 0 preserves the zero pattern); only the top-k ordering is.
+
+    3. CROSS-COHORT RNG COUPLING. Weight and subsample RNGs used the same
+       seeds for both cohorts, coupling the Monte Carlo noise that enters the
+       cross-cohort overlap table. Seeds now carry a per-cohort offset.
+       (Directionally, coupling could only inflate apparent cross-cohort
+       agreement; the recorded zero-overlap findings were therefore
+       conservative -- disclosed, not invalidated, on this count.)
+
+    Also fixed: the stratified_subsamples docstring claimed subsamples are
+    "held fixed across all fractions" -- false; the SCHEME is fixed, the draws
+    necessarily differ per fraction (different n). Interpretation of the sweep
+    is unaffected.
+
+    Interpretive consequence: the recorded D5 numbers (Kuncheva 0.084 -> 0.276,
+    ratio ~0.33 * f^2) were produced by a randomised lasso with inverted
+    weights. The perturbation was still exchangeable and random, so the
+    QUALITATIVE finding -- stability scales with subsample overlap -- is
+    expected to survive; the specific values are not citable. The plan's D5
+    table must be refreshed from this script's rerun, and the D3
+    design-attribution row rechecked.
+
 WHAT THIS ANSWERS
 -----------------
 Two DIFFERENT quantities have been conflated in discussion so far:
@@ -27,7 +67,9 @@ independent) differ in TWO ways. A sweep that used pairs at 0.5 and independent
 elsewhere would confound fraction with sampling scheme. Here the scheme is held
 fixed at independent stratified subsampling for all fractions, so the curve
 isolates fraction. The 0.5 point will therefore NOT reproduce the CPSS numbers
-exactly; CPSS remains a separate, error-controlled arm.
+exactly; CPSS remains a separate, error-controlled arm. As of rev (b) the BASE
+LEARNER (corrected randomised lasso) matches the CPSS arm, so the remaining
+difference at fraction 0.5 is the sampling scheme alone.
 
 ERROR BOUNDS
 ------------
@@ -42,8 +84,9 @@ STABILITY MEASURES (He & Yu 2010, Table 4)
 ------------------------------------------
   kuncheva_topk  -- Kuncheva (2007) MS7, corrected for chance given subset size.
                     His formula assumes |S| = |S'| = c, so it is computed on
-                    top-k sets ranked by |coefficient|, k = median selection
-                    size in that cell. This is Kuncheva's index proper.
+                    top-k sets ranked by |coefficient| (original beta scale,
+                    rev b), k = median selection size in that cell. This is
+                    Kuncheva's index proper.
   kuncheva_gen   -- chance-corrected index for the NATIVE variable-size sets:
                     (|S∩S'| - |S||S'|/m) / (min(|S|,|S'|) - |S||S'|/m).
                     A generalization, NOT Kuncheva's published statistic.
@@ -67,7 +110,7 @@ Usage:
         --filter-dir iqr_filtered_v4_prez \
         --phase2-tcga results/phase2_tuning/cox_tuning_20260804_231755/tcga_best_params.json \
         --phase2-orien results/phase2_tuning/cox_tuning_20260804_225946/orien_best_params.json \
-        --results-dir results/phase4b_fraction_stability
+        --results-dir results/phase4b_fraction_stability_v2
 """
 
 import argparse
@@ -102,11 +145,17 @@ B_FITS = 100                 # matches the 100 fits in the CPSS run
 ALPHA_MULTIPLIERS = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 PI_THRESHOLDS = [0.60, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
 RANDOM_SEED = 42
-WEAKNESS_ALPHA = 0.5         # frozen, as in Phase 4
+WEAKNESS_ALPHA = 0.5         # frozen, as in Phase 4 (corrected direction, rev b)
 REQUIRED_L1_RATIO = 1.0
 MAX_ITER = 100000
 TOL = 1e-7
 DATA_DIR = "data/processed"
+
+# Per-cohort seed offsets (rev b): decouple the Monte Carlo randomness that
+# enters the cross-cohort overlap table. Offsets are arbitrary constants far
+# apart; what matters is that TCGA and ORIEN no longer share weight or
+# subsample streams.
+COHORT_SEED_OFFSET = {'tcga': 0, 'orien': 500000}
 
 # Descriptive analysis, not error-controlled: a cell is reported if at least
 # this fraction of fits converged. Non-converged fits are excluded and counted.
@@ -166,8 +215,9 @@ def pairwise_stability(selections, ranked_selections, m, max_pairs=None, rng=Non
     Mean pairwise stability across fits.
 
     selections        : list of sets (native, variable-size)
-    ranked_selections : list of lists, genes ordered by descending |coef|,
-                        used to build equal-size top-k sets for Kuncheva proper
+    ranked_selections : list of lists, genes ordered by descending |beta|
+                        (original scale, rev b), used to build equal-size
+                        top-k sets for Kuncheva proper
     """
     n = len(selections)
     if n < 2:
@@ -214,8 +264,13 @@ def mb_bound(q, pi, p):
 
 def stratified_subsamples(y_event, fraction, n_fits, seed):
     """
-    Independent stratified subsamples, held fixed across all fractions so the
-    sweep isolates fraction rather than sampling scheme.
+    Independent stratified subsamples at the given fraction.
+
+    The sampling SCHEME (independent, event-stratified) is held fixed across
+    the whole sweep so the curve isolates fraction rather than scheme. The
+    draws themselves necessarily differ per fraction -- different subsample
+    sizes cannot share index sets. (Docstring corrected in rev b; the previous
+    text claimed the subsamples themselves were fixed across fractions.)
     """
     rng = np.random.RandomState(seed)
     ev = np.where(y_event == 1)[0]
@@ -237,6 +292,15 @@ def fit_one(X, y_event, y_time, gene_names, alpha, l1_ratio, weakness, rng):
     """
     Randomized lasso Cox on one subsample.
 
+    Randomisation (M&B 2010 Sec 3.1): W_j ~ Uniform(weakness, 1), ordinary
+    lasso on Z = X * W. Equivalent to effective penalty alpha * |beta_j| / W_j
+    on the original scale: smaller W_j means STRONGER penalisation.
+    (rev b: the previous version used Z = X / W -- the inverted direction --
+    and ranked genes by |gamma| on the scaled design. Corrected to Z = X * W
+    with back-transform beta = gamma * W before ranking. The zero pattern,
+    and hence the selected SET, is invariant to the diagonal scaling; the
+    top-k ordering is not.)
+
     Returns (selected_set, ranked_gene_list, n_nonzero, status).
     Convergence is captured explicitly: coordinate descent returns a partially
     optimised path at max_iter WITHOUT raising, and unconverged paths are less
@@ -245,7 +309,7 @@ def fit_one(X, y_event, y_time, gene_names, alpha, l1_ratio, weakness, rng):
     """
     p = X.shape[1]
     w = rng.uniform(weakness, 1.0, size=p)
-    Xs = X / w[np.newaxis, :]
+    Xs = X * w[np.newaxis, :]
     y = np.array([(bool(e), t) for e, t in zip(y_event, y_time)],
                  dtype=[('event', bool), ('time', float)])
 
@@ -262,10 +326,11 @@ def fit_one(X, y_event, y_time, gene_names, alpha, l1_ratio, weakness, rng):
            or "terminated early" in str(w_.message).lower() for w_ in caught):
         return set(), [], 0, "nonconverged"
 
-    coefs = model.coef_[:, 0]
-    nz = np.abs(coefs) > 1e-10
+    gamma = model.coef_[:, 0]
+    beta = gamma * w                        # back-transform to original scale
+    nz = np.abs(gamma) > 1e-10              # zero pattern: scale-invariant
     sel_idx = np.where(nz)[0]
-    order = sel_idx[np.argsort(-np.abs(coefs[sel_idx]))]
+    order = sel_idx[np.argsort(-np.abs(beta[sel_idx]))]
     ranked = [gene_names[j] for j in order]
     return set(ranked), ranked, int(nz.sum()), "ok"
 
@@ -311,7 +376,7 @@ if __name__ == "__main__":
     ap.add_argument('--filter-dir', default='iqr_filtered_v4_prez')
     ap.add_argument('--phase2-tcga', required=True)
     ap.add_argument('--phase2-orien', required=True)
-    ap.add_argument('--results-dir', default='results/phase4b_fraction_stability')
+    ap.add_argument('--results-dir', default='results/phase4b_fraction_stability_v2')
     ap.add_argument('--fractions', type=float, nargs='+', default=FRACTIONS)
     ap.add_argument('--multipliers', type=float, nargs='+', default=ALPHA_MULTIPLIERS)
     ap.add_argument('--n-fits', type=int, default=B_FITS)
@@ -328,12 +393,15 @@ if __name__ == "__main__":
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     logging.getLogger().addHandler(fh)
 
-    logger.info("Phase 4b: subsampling-fraction stability sweep")
+    logger.info("Phase 4b: subsampling-fraction stability sweep (rev b)")
+    logger.info("  base learner: corrected randomized lasso (Z = X*W), matching CPSS arm")
     logger.info(f"  fractions:   {args.fractions}")
     logger.info(f"  multipliers: {args.multipliers}")
     logger.info(f"  fits/cell:   {args.n_fits}")
     logger.info("  sampling:    INDEPENDENT stratified at every fraction "
                 "(isolates fraction; CPSS is a separate arm)")
+    logger.info("  RNG:         per-cohort seed offsets "
+                f"{COHORT_SEED_OFFSET} (weights and subsamples decoupled)")
     logger.info("  NOTE: no M&B / Shah-Samworth bound applies at fraction != 0.5")
 
     # ---- Data --------------------------------------------------------------
@@ -376,19 +444,24 @@ if __name__ == "__main__":
     for cohort in ('tcga', 'orien'):
         X, ev, tm = cohort_data[cohort]
         alpha0 = anchors[cohort]['alpha']
+        off = COHORT_SEED_OFFSET[cohort]
         logger.info("")
         logger.info("=" * 70)
         logger.info(f"{cohort.upper()}: {X.shape[0]} samples, {int(ev.sum())} events")
         logger.info("=" * 70)
 
         for frac in args.fractions:
-            subs = stratified_subsamples(ev, frac, args.n_fits, args.seed)
+            # rev b: subsample stream decoupled across cohorts via offset
+            subs = stratified_subsamples(ev, frac, args.n_fits, args.seed + off)
             logger.info(f"\n  fraction {frac}: n={len(subs[0])}, "
                         f"events={int(ev[subs[0]].sum())}")
 
             for mult in args.multipliers:
                 alpha = alpha0 * mult
-                wr = np.random.RandomState(args.seed + 1000)
+                # rev b: weight stream decoupled across cohorts via offset.
+                # Reset per (fraction, multiplier) so cells within a cohort
+                # remain comparable (same weight sequence per fit index).
+                wr = np.random.RandomState(args.seed + 1000 + off)
 
                 sels, ranked, nnz = [], [], []
                 status = {"ok": 0, "nonconverged": 0, "arithmetic_error": 0}
@@ -510,16 +583,21 @@ if __name__ == "__main__":
 
     with open(results_dir / "config.json", 'w') as f:
         json.dump({
+            'revision': ('b (2026-08): corrected weight direction Z=X*W, '
+                         'beta-scale ranking, per-cohort RNG offsets; '
+                         'supersedes the pre-audit fraction sweep'),
             'design': 'independent stratified subsampling at every fraction',
             'fractions': args.fractions, 'multipliers': args.multipliers,
             'n_fits': args.n_fits, 'pi_thresholds': PI_THRESHOLDS,
             'weakness_alpha': WEAKNESS_ALPHA, 'seed': args.seed,
+            'cohort_seed_offsets': COHORT_SEED_OFFSET,
             'n_genes': p, 'phase2_provenance': provenance,
             'bound_note': ('M&B and Shah-Samworth bounds are derived for '
                            'subsamples of size n/2; no bound applies at '
                            'fraction != 0.5'),
             'stability_measures': {
-                'kuncheva_topk': 'Kuncheva (2007) MS7 on equal-size top-k sets',
+                'kuncheva_topk': ('Kuncheva (2007) MS7 on equal-size top-k sets, '
+                                  'ranked by |beta| on the original scale'),
                 'kuncheva_gen': 'chance-corrected generalization, NOT Kuncheva',
                 'jaccard': 'not chance-corrected; confounded with subset size',
             },
