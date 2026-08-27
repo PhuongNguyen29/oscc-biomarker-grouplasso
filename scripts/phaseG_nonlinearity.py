@@ -91,7 +91,7 @@ PROC_DIR = Path("data/processed")
 EXT_DIR  = Path("data/external")
 K1_DIR   = Path("results/phaseK1_module_preservation")
 HUB_DIR  = Path("results/phaseK1_6_hub_overlap")
-CPSS_DIR = Path("results/phase4_cpss_FINAL")
+CPSS_DIR = Path("results/phase4_cpss_RULEFIX")  # rev b run of record; union_genes.txt is now the SS-primary 3-gene set (plan D2b)
 K3_DIR   = Path("results/phaseK3_bootstrap_variance")
 OUT_DIR  = Path("results/phaseG_nonlinearity")
 

@@ -6,8 +6,8 @@
 # THE QUESTION
 # ------------
 # Gene-level lasso selection does not transport: zero cross-cohort overlap in
-# 42 of 42 estimable CPSS cells, and within-cohort Kuncheva never above 0.28
-# even at subsample fraction 0.9. But co-expression MODULES do transport
+# 56 of 56 estimable CPSS cells (RULEFIX run, plan D2b), and within-cohort
+# Kuncheva never above 0.29 even at subsample fraction 0.9 (D5 rev b). But co-expression MODULES do transport
 # (K1: Zsummary above the null-control ceiling in every test cohort, Fisher
 # one-to-one mapping at p = 5.7e-280).
 #
@@ -55,7 +55,7 @@ enableWGCNAThreads()
 
 PROC_DIR <- "data/processed"
 K1_DIR   <- "results/phaseK1_module_preservation"
-CPSS_DIR <- "results/phase4_cpss_FINAL"
+CPSS_DIR <- "results/phase4_cpss_RULEFIX"   # rev b run of record (plan D2b)
 OUT_DIR  <- "results/phaseK1_6_hub_overlap"
 
 K_GRID   <- c(10, 20, 50)     # report the curve, not a chosen k
@@ -236,13 +236,21 @@ cat("\n", rep("=", 74), "\n", sep = "")
 cat("COMPARATOR — lasso (CPSS) selection at matched set size\n")
 cat(rep("=", 74), "\n", sep = "")
 
-sp_t <- file.path(CPSS_DIR, "selection_probabilities")
-f_t <- list.files(sp_t, pattern = "^tcga.*mult0p80", full.names = TRUE)
-f_o <- list.files(sp_t, pattern = "^orien.*mult0p80", full.names = TRUE)
+# CANONICAL ARTIFACTS (repointed after audit): Phase 4 writes the SELECTED
+# cell's selection probabilities under fixed names, so this script never
+# reconstructs the operating point from a filename pattern. The old
+# "^tcga.*mult0p80" pattern hard-coded a cell the A4.5 rule is supposed to
+# choose. Ties in the top-N ranking are broken by file (gene-universe) order,
+# deterministically but arbitrarily -- same as before, now stated.
+f_t <- file.path(CPSS_DIR, "selected_tcga_selection_probabilities.csv")
+f_o <- file.path(CPSS_DIR, "selected_orien_selection_probabilities.csv")
 
-if (length(f_t) && length(f_o)) {
-  pt2 <- read.csv(f_t[1], row.names = 1); po2 <- read.csv(f_o[1], row.names = 1)
-  cat("  selection probabilities from:", basename(f_t[1]), "/", basename(f_o[1]), "\n")
+if (file.exists(f_t) && file.exists(f_o)) {
+  pt2 <- read.csv(f_t, row.names = 1); po2 <- read.csv(f_o, row.names = 1)
+  cat("  selection probabilities: canonical selected-cell artifacts\n")
+  cat("  selected cell:",
+      paste(readLines(file.path(CPSS_DIR, "selected_cell.json"), warn = FALSE),
+            collapse = " "), "\n")
   cat(sprintf("  %8s %9s %8s\n", "set size", "Kuncheva", "Jaccard"))
   for (k in K_GRID) {
     for (m in c(1, nrow(pairs))) {  # per-module-equivalent and union-equivalent
@@ -263,9 +271,9 @@ if (length(f_t) && length(f_o)) {
   cat("\n  Lasso selection probabilities are ranked highest-first; the top-N\n")
   cat("  genes are the closest like-for-like comparator to a top-k hub set.\n")
 } else {
-  cat("  Selection-probability files not found under", sp_t, "\n")
-  cat("  Compare against the D5 record instead: cross-cohort overlap was ZERO\n")
-  cat("  in 42/42 estimable CPSS cells.\n")
+  cat("  Canonical selected-cell artifacts not found under", CPSS_DIR, "\n")
+  cat("  Compare against the D2b record instead: cross-cohort overlap was ZERO\n")
+  cat("  in 56/56 estimable CPSS cells.\n")
 }
 
 cat("\n", rep("=", 74), "\n", sep = "")

@@ -72,7 +72,7 @@ options(stringsAsFactors = FALSE)
 HUB_DIR  <- "results/phaseK1_6_hub_overlap"
 E8_DIR   <- "results/phase8_transportability"
 K1_DIR   <- "results/phaseK1_module_preservation"
-CPSS_DIR <- "results/phase4_cpss_FINAL"
+CPSS_DIR <- "results/phase4_cpss_RULEFIX"   # rev b run of record (plan D2b)
 GMT_DIR  <- "data/genesets"
 OUT_DIR  <- "results/phaseK1_6_8_enrichment"
 
@@ -130,11 +130,12 @@ hub_set <- function(k) {
   }
   unique(out)
 }
-sp <- file.path(CPSS_DIR, "selection_probabilities")
-ft <- list.files(sp, pattern = "^tcga.*mult0p80",  full.names = TRUE)
-fo <- list.files(sp, pattern = "^orien.*mult0p80", full.names = TRUE)
+# Canonical selected-cell artifacts (repointed after audit); see K1.6.4 note.
+ft <- file.path(CPSS_DIR, "selected_tcga_selection_probabilities.csv")
+fo <- file.path(CPSS_DIR, "selected_orien_selection_probabilities.csv")
 lasso_set <- function(n) {
-  pt <- read.csv(ft[1], row.names = 1); po <- read.csv(fo[1], row.names = 1)
+  stopifnot(file.exists(ft), file.exists(fo))
+  pt <- read.csv(ft, row.names = 1); po <- read.csv(fo, row.names = 1)
   h <- ceiling(n / 2)
   unique(c(rownames(pt)[order(-pt[, 1])][seq_len(h)],
            rownames(po)[order(-po[, 1])][seq_len(h)]))
