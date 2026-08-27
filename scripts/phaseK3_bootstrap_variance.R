@@ -201,6 +201,15 @@ cat("\n")
 write.csv(data.frame(gene = hub),
           file.path(OUT_DIR, "hub250_genes.csv"), row.names = FALSE)
 
+# --- Canonical per-patient scores (added for Chapter 5 risk-group analyses) ---
+for (nm in names(scores)) for (co in names(scores[[nm]])) {
+  stopifnot(!is.null(rownames(X[[co]])))
+  write.csv(data.frame(patient_id = rownames(X[[co]]),
+                       score = scores[[nm]][[co]]),
+            file.path(OUT_DIR, sprintf("scores_%s_%s.csv", nm, co)),
+            row.names = FALSE)
+}
+
 # ==============================================================================
 # (1) Bootstrap
 # ==============================================================================
