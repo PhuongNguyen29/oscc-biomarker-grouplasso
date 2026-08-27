@@ -285,8 +285,10 @@ for (ref in c("TCGA", "ORIEN")) {
   cat("### modules defined in", ref, "###\n")
   cohorts <- names(X)
   ve <- sapply(cohorts, function(co) {
-    v <- VE_by[[paste(ref, co)]]
-    setNames(as.numeric(v[1, ]), sub("^ME", "", colnames(v)))
+    v  <- VE_by[[paste(ref, co)]]
+    nm <- sub("^ME", "", colnames(ME_by[[paste(ref, co)]]))
+    stopifnot(ncol(v) == length(nm))
+    setNames(as.numeric(v[1, ]), nm)
   })
   if (is.null(dim(ve))) next
   cat(sprintf("  %-12s %8s %8s %10s %10s %10s\n", "module", "TCGA", "ORIEN",
