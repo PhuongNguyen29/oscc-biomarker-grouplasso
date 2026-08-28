@@ -97,7 +97,12 @@ for (co in names(SURV_FILES)) {
   plots[[co]] <- ggsurvplot(
     fit, data = d,
     palette = c("#2E86DE", "#E74C3C"),
-    conf.int = TRUE, risk.table = FALSE, censor.size = 3,
+    conf.int = TRUE, censor.size = 3,
+    # 5-year OS convention: DISPLAY truncation only (survminer xlim clips the
+    # view without refitting); survdiff below uses complete follow-up.
+    xlim = c(0, 60), break.time.by = 12,
+    risk.table = TRUE, risk.table.height = 0.22,
+    risk.table.y.text = FALSE, risk.table.title = "Number at risk",
     legend.labs = sprintf("%s (n=%d, %d ev)",
                           levels(d$risk_group),
                           table(d$risk_group),
@@ -113,17 +118,20 @@ for (co in names(SURV_FILES)) {
     n_low  = sum(d$risk_group == "Low Risk"),
     logrank_p = p, median_score = med, in_sample = IN_SAMPLE[co],
     median_surv_low  = summary(fit)$table["risk_group=Low Risk",  "median"],
-    median_surv_high = summary(fit)$table["risk_group=High Risk", "median"])
+    median_surv_high = summary(fit)$table["risk_group=High Risk", "median"],
+    n_followup_beyond_60mo = sum(d$time_months > 60),
+    max_followup_months = max(d$time_months))
 
   cat(sprintf("[%s] n=%d, events=%d, log-rank p = %.4g%s\n",
               co, nrow(d), sum(d$event), p,
               if (IN_SAMPLE[co]) "  [in-sample]" else ""))
 }
 
-panel <- arrange_ggsurvplots(plots, print = FALSE, ncol = 2, nrow = 2)
+panel <- arrange_ggsurvplots(plots, print = FALSE, ncol = 2, nrow = 2,
+                             risk.table.height = 0.22)
 ggsave(file.path(OUT_DIR, "km_hub250_2x2.png"), panel,
-       width = 13, height = 10, dpi = 300)
-ggsave(file.path(OUT_DIR, "km_hub250_2x2.pdf"), panel, width = 13, height = 10)
+       width = 13, height = 15, dpi = 300)
+ggsave(file.path(OUT_DIR, "km_hub250_2x2.pdf"), panel, width = 13, height = 15)
 
 write.csv(do.call(rbind, rows),
           file.path(OUT_DIR, "km_hub250_summary.csv"), row.names = FALSE)
