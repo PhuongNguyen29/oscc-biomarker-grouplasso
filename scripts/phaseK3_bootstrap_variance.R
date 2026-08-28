@@ -192,6 +192,9 @@ for (nm in c("hub_250", "lasso_250")) {
   cv <- cv.glmnet(X$ORIEN[, g, drop = FALSE], Y$ORIEN, family = "cox",
                   alpha = 0, nfolds = 10, standardize = FALSE)
   b <- as.numeric(coef(cv, s = "lambda.min"))
+  write.csv(data.frame(gene = g, beta = b),
+            file.path(OUT_DIR, sprintf("coefs_%s.csv", nm)),
+            row.names = FALSE)
   for (co in names(X))
     scores[[nm]][[co]] <- as.numeric(X[[co]][, g, drop = FALSE] %*% b)
   cat(sprintf("  %-14s %d genes\n", nm, length(g)))
