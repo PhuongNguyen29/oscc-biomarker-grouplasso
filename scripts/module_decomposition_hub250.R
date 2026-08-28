@@ -51,7 +51,7 @@ EXPR_FILES <- list(
   GSE41613 = "data/external/GSE41613_expression.csv",
   GSE42743 = "data/external/GSE42743_expression.csv")
 
-MODULE_ASSIGN <- "results/phaseK3_bootstrap_variance/module_assignments.csv"
+MODULE_ASSIGN <- "results/phaseK1_module_preservation/module_assignments.csv"
 
 # Programme annotations (from K1.6.8 enrichment; extend as the chapter names them)
 PROGRAMS <- c("pink_black" = "interferon/immune",
