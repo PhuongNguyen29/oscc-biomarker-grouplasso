@@ -56,7 +56,10 @@ IN_SAMPLE <- c(TCGA = FALSE, ORIEN = TRUE, GSE41613 = FALSE, GSE42743 = FALSE)
 EXPECTED <- list(TCGA = c(339, 153), ORIEN = c(1112, 450),
                  GSE41613 = c(97, 51), GSE42743 = c(71, 40))
 
-to_months <- function(t) if (max(t, na.rm = TRUE) > 300) t / 30.44 else t
+UNITS <- c(TCGA = "months", ORIEN = "months",
+           GSE41613 = "months", GSE42743 = "days")
+conv  <- c(days = 1/30.44, months = 1)
+
 
 plots <- list(); rows <- list()
 
@@ -79,7 +82,7 @@ for (co in names(SURV_FILES)) {
   # Regression gate: must reproduce K3's cohort composition exactly
   stopifnot(nrow(d) == EXPECTED[[co]][1], sum(d$event) == EXPECTED[[co]][2])
 
-  d$time_months <- to_months(d$time)
+  d$time_months <- d$time * conv[[UNITS[co]]]
   med <- median(d$score)
   d$risk_group <- factor(ifelse(d$score >= med, "High Risk", "Low Risk"),
                          levels = c("Low Risk", "High Risk"))
