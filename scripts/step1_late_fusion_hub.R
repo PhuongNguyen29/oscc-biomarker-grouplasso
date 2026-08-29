@@ -49,6 +49,11 @@ dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 DATASETS <- c("GSE41613", "GSE42743")
 CLINICAL_SEEDS <- c(42, 123, 456)
 PRIMARY_SEED <- 42
+available_seeds <- function(dataset) {
+  f <- file.path(OOF_DIR, sprintf("%s_clinical_oof_scores.csv", dataset))
+  nm <- names(read.csv(f, nrows = 1))
+  sort(as.integer(sub("^risk_score_seed", "", grep("^risk_score_seed\\d+$", nm, value = TRUE))))
+}
 TIES <- "efron"    # set to "breslow" to reproduce the legacy lifelines fits
 
 load_clinical_oof <- function(dataset, seed) {
@@ -94,7 +99,10 @@ lrt <- function(ll_full, ll_reduced, df_diff = 1) {
 rows <- list()
 for (ds in DATASETS) {
   hub <- load_hub_score(ds)
-  for (seed in CLINICAL_SEEDS) {
+  seeds <- available_seeds(ds)
+  cat(sprintf("[%s] %d clinical seeds available (%d..%d)\n",
+              ds, length(seeds), min(seeds), max(seeds)))
+  for (seed in seeds) {
     clin <- load_clinical_oof(ds, seed)
     d <- merge(clin, hub, by = "sampleID")
     stopifnot(nrow(d) == nrow(clin), nrow(d) == nrow(hub))
@@ -142,3 +150,13 @@ out <- do.call(rbind, rows)
 write.csv(out, file.path(OUT_DIR, "late_fusion_hub_summary.csv"),
           row.names = FALSE)
 cat(sprintf("Written: %s/late_fusion_hub_summary.csv\n", OUT_DIR))
+
+for (ds in DATASETS) {
+  s <- out[out$dataset == ds, ]
+  p <- s$p_hub_over_clinical
+  cat(sprintf("\n[%s] hub-over-clinical across %d seeds: median p=%.4g, range %.4g-%.4g, %d/%d seeds p<0.05\n",
+              ds, nrow(s), median(p), min(p), max(p), sum(p < 0.05), nrow(s)))
+  cat(sprintf("  C-index: clinical %.3f-%.3f, hub %.3f (fixed), combined %.3f-%.3f\n",
+              min(s$c_clinical), max(s$c_clinical), s$c_hub[1],
+              min(s$c_combined), max(s$c_combined)))
+}
