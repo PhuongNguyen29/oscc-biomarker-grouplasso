@@ -60,19 +60,22 @@ load_clinical_oof <- function(dataset, seed) {
   if (!col %in% names(d))
     stop(f, ": column ", col, " not found; have: ",
          paste(names(d), collapse = ", "))
+  
+  # Legacy Step 0B wrote `event` from a Python bool -> "True"/"False" strings.
   ev <- d$event
-  if (is.logical(ev)) ev <- as.integer(ev)
-  else if (is.character(ev) || is.factor(ev)) {
+  if (is.logical(ev)) {
+    ev <- as.integer(ev)
+  } else if (is.character(ev) || is.factor(ev)) {
     ev <- as.character(ev)
-    ev <- ifelse(ev %in% c("TRUE","True","true","1"), 1L,
-                 ifelse(ev %in% c("FALSE","False","false","0"), 0L, NA_integer_))
-  } else ev <- as.integer(ev)
+    ev <- ifelse(ev %in% c("TRUE", "True", "true", "1"), 1L,
+                 ifelse(ev %in% c("FALSE", "False", "false", "0"), 0L, NA_integer_))
+  } else {
+    ev <- as.integer(ev)
+  }
   stopifnot(!any(is.na(ev)), all(ev %in% c(0L, 1L)))
   
   data.frame(sampleID = d$sampleID, clinical_score = d[[col]],
              event = ev, time = as.numeric(d$time))
-  cat(sprintf("  [check] %s: n=%d, events=%d\n", ds, nrow(d), sum(d$event)))
-
 }
 
 load_hub_score <- function(dataset) {
@@ -95,7 +98,7 @@ for (ds in DATASETS) {
     clin <- load_clinical_oof(ds, seed)
     d <- merge(clin, hub, by = "sampleID")
     stopifnot(nrow(d) == nrow(clin), nrow(d) == nrow(hub))
-
+    cat(sprintf("  [check] %s: n=%d, events=%d\n", ds, nrow(d), sum(d$event)))
     # Standardize within cohort (comparable betas; the LRT is scale-invariant)
     d$clinical_score <- as.numeric(scale(d$clinical_score))
     d$hub_score      <- as.numeric(scale(d$hub_score))
