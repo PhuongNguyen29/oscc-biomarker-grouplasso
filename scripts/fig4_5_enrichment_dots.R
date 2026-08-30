@@ -84,8 +84,8 @@ gg <- ggplot(top, aes(x = fold, y = row, size = overlap, colour = logq,
 # portrait page (~6.5 in text width) it will be scaled to ~50%, halving the
 # effective font size -- either place it landscape / full-page, or re-render at
 # width = 7.5 with base_size = 9. Decide once and keep it consistent.
-ggsave(file.path(OUT_DIR, "fig4_5_enrichment_dots.pdf"), gg, width = 13, height = 8.5)
-ggsave(file.path(OUT_DIR, "fig4_5_enrichment_dots.png"), gg, width = 13, height = 8.5, dpi = 300)
+ggsave(file.path(OUT_DIR, "fig4_5_enrichment_dots.pdf"), gg, width = 14, height = 8.5)
+ggsave(file.path(OUT_DIR, "fig4_5_enrichment_dots.png"), gg, width = 14, height = 8.5, dpi = 300)
 cat("Written:", file.path(OUT_DIR, "fig4_5_enrichment_dots.{pdf,png}"), "\n")
 cat(sprintf("Terms shown: %d of %d with q < %.2f\n",
             nrow(top), sum(enr$q < Q_CUT), Q_CUT))
