@@ -47,8 +47,8 @@ top <- enr %>%
                       sprintf("%s\n(%s)", PROGRAM[pair], pair), pair),
     # Trim long GO names; keep them recognizable
     term_lab = gsub("_", " ", sub("^(GOBP|HALLMARK)_", "", term)),
-    term_lab = ifelse(nchar(term_lab) > 58,
-                      paste0(substr(term_lab, 1, 56), "..."), term_lab),
+    # term_lab = ifelse(nchar(term_lab) > 58,
+    #                   paste0(substr(term_lab, 1, 56), "..."), term_lab),
     logq = -log10(pmax(q, 1e-60)))
 
 # Order terms by significance within pair for readability
