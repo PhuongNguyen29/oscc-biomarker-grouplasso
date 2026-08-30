@@ -47,16 +47,21 @@ top <- enr %>%
                       sprintf("%s\n(%s)", PROGRAM[pair], pair), pair),
     # Trim long GO names; keep them recognizable
     term_lab = gsub("_", " ", sub("^(GOBP|HALLMARK)_", "", term)),
-    term_lab = ifelse(nchar(term_lab) > 42,
-                      paste0(substr(term_lab, 1, 40), "..."), term_lab),
+    term_lab = ifelse(nchar(term_lab) > 58,
+                      paste0(substr(term_lab, 1, 56), "..."), term_lab),
     logq = -log10(pmax(q, 1e-60)))
 
 # Order terms by significance within pair for readability
 top <- top %>% arrange(pair_lab, logq) %>%
   mutate(row = factor(paste(pair_lab, term_lab), levels = unique(paste(pair_lab, term_lab))))
 
-gg <- ggplot(top, aes(x = fold, y = row, size = overlap, colour = logq)) +
+top$collection_lab <- ifelse(grepl("^h\\.all", top$collection),
+                             "Hallmark", "GO BP")
+
+gg <- ggplot(top, aes(x = fold, y = row, size = overlap, colour = logq,
+                      shape = collection_lab)) +
   geom_point() +
+  scale_shape_manual(values = c("Hallmark" = 16, "GO BP" = 17), name = NULL) +
   facet_grid(pair_lab ~ ., scales = "free_y", space = "free_y", switch = "y") +
   scale_y_discrete(labels = function(x) sub("^.*\\)\\s*", "", x)) +
   scale_colour_viridis_c(option = "plasma", direction = -1,
@@ -66,17 +71,21 @@ gg <- ggplot(top, aes(x = fold, y = row, size = overlap, colour = logq)) +
        title = "Each matched module pair is a distinct biological programme",
        subtitle = paste0("Top ", TOP_N, " terms per pair per collection ",
                          "(Hallmark, GO BP); full table in the supplement")) +
-  theme_bw(base_size = 10) +
+  theme_bw(base_size = 12) +
   theme(strip.placement = "outside",
         strip.background = element_blank(),
-        strip.text.y.left = element_text(angle = 0, face = "bold", size = 8.5),
+        strip.text.y.left = element_text(angle = 0, face = "bold", size = 10),
         panel.grid.minor = element_blank(),
         plot.title = element_text(face = "bold", size = 12),
         plot.subtitle = element_text(size = 9, colour = "grey30"),
         legend.position = "right")
 
-ggsave(file.path(OUT_DIR, "fig4_5_enrichment_dots.pdf"), gg, width = 9.5, height = 8)
-ggsave(file.path(OUT_DIR, "fig4_5_enrichment_dots.png"), gg, width = 9.5, height = 8, dpi = 300)
+# NOTE ON SIZING: rendered at 13 x 8.5 in. If the dissertation places this on a
+# portrait page (~6.5 in text width) it will be scaled to ~50%, halving the
+# effective font size -- either place it landscape / full-page, or re-render at
+# width = 7.5 with base_size = 9. Decide once and keep it consistent.
+ggsave(file.path(OUT_DIR, "fig4_5_enrichment_dots.pdf"), gg, width = 13, height = 8.5)
+ggsave(file.path(OUT_DIR, "fig4_5_enrichment_dots.png"), gg, width = 13, height = 8.5, dpi = 300)
 cat("Written:", file.path(OUT_DIR, "fig4_5_enrichment_dots.{pdf,png}"), "\n")
 cat(sprintf("Terms shown: %d of %d with q < %.2f\n",
             nrow(top), sum(enr$q < Q_CUT), Q_CUT))
