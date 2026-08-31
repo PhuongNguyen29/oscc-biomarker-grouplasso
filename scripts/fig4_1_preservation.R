@@ -36,13 +36,22 @@ c_ref  <- pick(c("reference", "ref", "reference_cohort"), "reference")
 c_test <- pick(c("test", "test_cohort"), "test")
 c_mod  <- pick(c("module", "moduleColor", "color"), "module")
 c_z    <- pick(c("Zsummary", "Zsummary.pres", "zsummary"), "Zsummary")
-c_ceil <- pick(c("null_ceiling", "ceiling", "max_null_Z", "null_max"), "null ceiling")
+c_ceil <- pick(c("null_Z", "null_ceiling", "ceiling", "max_null_Z", "null_max"),
+               "null ceiling")
 c_size <- intersect(c("moduleSize", "size", "n_genes"), names(ps))
 
 d <- data.frame(reference = ps[[c_ref]], test = ps[[c_test]],
                 module = ps[[c_mod]], Z = ps[[c_z]], ceiling = ps[[c_ceil]])
 if (length(c_size)) d$size <- ps[[c_size[1]]]
-d <- d[d$module != "grey" & d$module != "gold", ]
+
+# Prefer the pipeline's own flags over recomputing them here.
+if ("above_null" %in% names(ps)) d$above <- as.logical(ps$above_null)
+if ("is_control" %in% names(ps)) d$is_control <- as.logical(ps$is_control)
+
+# Drop the control modules (gold = random reference, grey = unassigned): they
+# define the null, so plotting them as if they were findings is misleading.
+if ("is_control" %in% names(d)) d <- d[!d$is_control, ]
+d <- d[!d$module %in% c("grey", "gold"), ]
 
 # Provenance tripwire: the recorded ORIEN -> TCGA ceiling is 10.3
 chk <- unique(d$ceiling[d$reference == "ORIEN" & d$test == "TCGA"])
@@ -50,7 +59,13 @@ stopifnot(length(chk) == 1, abs(chk - 10.3) < 0.3)
 
 d$comparison <- factor(paste(d$reference, "\u2192", d$test),
                        levels = unique(paste(d$reference, "\u2192", d$test)))
-d$preserved <- ifelse(d$Z > d$ceiling, "Above null ceiling", "Not preserved")
+d$preserved <- if ("above" %in% names(d))
+  ifelse(d$above, "Above null ceiling", "Not preserved") else
+  ifelse(d$Z > d$ceiling, "Above null ceiling", "Not preserved")
+# If both exist they must agree -- a mismatch means the ceiling column is not
+# the quantity above_null was computed against.
+if (all(c("above", "ceiling") %in% names(d)))
+  stopifnot(identical(d$above, d$Z > d$ceiling))
 
 ceil <- d %>% group_by(comparison) %>% summarise(ceiling = first(ceiling))
 
@@ -83,6 +98,7 @@ c_mr <- intersect(c("medianRank", "medianRank.pres", "median_rank"), names(ps))
 if (length(c_mr)) {
   d$mr <- ps[[c_mr[1]]][match(paste(d$reference, d$test, d$module),
                               paste(ps[[c_ref]], ps[[c_test]], ps[[c_mod]]))]
+  stopifnot(!any(is.na(d$mr)))
   gg2 <- ggplot(d, aes(x = mr, y = reorder(module, -mr))) +
     geom_point(size = 2.4, colour = "#3C6E71") +
     facet_wrap(~comparison, scales = "free_y", ncol = 3) +
