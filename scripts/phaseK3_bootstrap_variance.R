@@ -53,7 +53,7 @@ K1_DIR   <- "results/phaseK1_module_preservation"
 HUB_DIR  <- "results/phaseK1_6_hub_overlap"
 CPSS_DIR <- "results/phase4_cpss_RULEFIX"
 E8_DIR   <- "results/phase8_transportability"
-OUT_DIR  <- "results/phaseK3_bootstrap_variance"
+OUT_DIR  <- "results/phaseK3_bootstrap_variance_k30"
 
 N_BOOT    <- 2000
 SEED      <- 42
@@ -184,7 +184,7 @@ for (co in names(X)) {
 cat("  eigengene_K1.5:", length(cf_me), "modules\n")
 
 # --- 2/3. hub and lasso ridge Cox, matched size ------------------------------
-hub <- hub_set(40); lasso <- lasso_set(length(hub))
+hub <- hub_set(30); lasso <- lasso_set(length(hub))
 for (nm in c("hub_250", "lasso_250")) {
   g <- if (nm == "hub_250") hub else lasso
   g <- Reduce(intersect, c(list(g), lapply(X, colnames)))
