@@ -33,10 +33,10 @@ suppressPackageStartupMessages({
   library(survminer)
 })
 
-K3_DIR   <- "results/phaseK3_bootstrap_variance"
+K3_DIR   <- "results/phaseK3_bootstrap_variance_k30"
 PROC_DIR <- "data/processed"
 EXT_DIR  <- "data/external"
-OUT_DIR  <- "results/km_hub250"
+OUT_DIR  <- "results/km_hub250_k30"
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Same reader as phaseK3 -- byte-identical conventions
