@@ -54,8 +54,12 @@ EXPR_FILES <- list(
 MODULE_ASSIGN <- "results/phaseK1_module_preservation/module_assignments.csv"
 
 # Programme annotations (from K1.6.8 enrichment; extend as the chapter names them)
-PROGRAMS <- c("pink_black" = "interferon/immune",
-              "green_red"  = "myogenesis/stromal")
+PROGRAMS <- c(
+  "brown_yellow"   = "Adaptive immune / T cell",
+  "turquoise_blue" = "ECM / mesenchymal",
+  "blue_green"     = "Epithelial differentiation",
+  "pink_black"     = "Interferon",
+  "green_red"      = "Myogenesis")
 
 TOL <- 1e-6
 
