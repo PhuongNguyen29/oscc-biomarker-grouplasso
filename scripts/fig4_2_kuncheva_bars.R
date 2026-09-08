@@ -23,20 +23,28 @@ K164_DIR <- "results/phaseK1_6_hub_overlap_k30"
 OUT_DIR <- "results/figures"
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
-hub <- read.csv(file.path(K164_DIR, "hub_overlap.csv")) %>%
-  filter(tcga_module == "union") %>%              # check the actual column name
-  transmute(size = as.character(n_T), kuncheva,
+ov <- read.csv(file.path(K164_DIR, "hub_overlap.csv"))
+
+# Number of matched pairs, read from the data rather than assumed
+n_pairs <- ov %>% filter(level == "per_module") %>%
+  distinct(tcga_module, orien_module) %>% nrow()
+stopifnot(n_pairs == 5)
+
+# Hub: union rows. Union size = n_pairs * k (pairs are disjoint gene sets).
+hub <- ov %>% filter(level == "union") %>%
+  transmute(size = n_pairs * k, kuncheva,
             selector = "Module membership (kME hubs)")
 
-las <- read.csv(file.path(K164_DIR, "lasso_comparator_overlap.csv")) %>%
-  filter(set_size %in% as.integer(hub$size)) %>%  # union sizes only, not per-module
-  transmute(size = as.character(set_size), kuncheva,
-            selector = "Penalized regression (lasso top-N)")
+# Lasso: size is in the level string ("lasso_n250"), NOT the k column.
+las <- ov %>% filter(grepl("^lasso_n", level)) %>%
+  transmute(size = as.integer(sub("^lasso_n", "", level)), kuncheva,
+            selector = "Penalized regression (lasso top-N)") %>%
+  filter(size %in% hub$size)          # keep only union-matched sizes
 
-df <- bind_rows(hub, las)
-df$size <- factor(df$size, levels = sort(unique(as.integer(df$size))))
-stopifnot(nrow(df) == 6)                          # 3 sizes x 2 selectors
-print(df)                                 
+df <- bind_rows(hub, las) %>% arrange(size)
+df$size <- factor(df$size, levels = sort(unique(df$size)))
+stopifnot(nrow(df) == 6)
+print(df)                              # verify before plotting    
 
 gg <- ggplot(df, aes(size, kuncheva, fill = selector)) +
   geom_col(position = position_dodge(width = 0.7), width = 0.62) +
