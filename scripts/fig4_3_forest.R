@@ -18,7 +18,7 @@
 # ==============================================================================
 
 suppressPackageStartupMessages(library(ggplot2))
-K3_FILE <- "results/phaseK3_bootstrap_variance/bootstrap_cis.csv"
+K3_FILE <- "results/phaseK3_bootstrap_variance_k30/bootstrap_cis.csv"
 OUT_DIR <- "results/figures"
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
@@ -51,15 +51,15 @@ stopifnot(nrow(d) == 12)
 hub41613 <- d[grepl("hub", d$score, ignore.case = TRUE) &
               grepl("41613", d$cohort), ]
 stopifnot(nrow(hub41613) == 1,
-          abs(hub41613$lo - 0.608) < 0.002, abs(hub41613$hi - 0.749) < 0.002)
+          abs(hub41613$lo - 0.611) < 0.002, abs(hub41613$hi - 0.752) < 0.002)
 
 score_labs <- c("eigengene_K1.5" = "Eigengene score",
-                "hub_250"        = "Hub score (309 genes)",
+                "hub_250"        = "Hub score (247 genes)",
                 "lasso_250"      = "Lasso score (matched size)")
 d$score_lab <- ifelse(d$score %in% names(score_labs),
                       score_labs[d$score], d$score)
 d$score_lab <- factor(d$score_lab, levels = rev(c(
-  "Hub score (309 genes)", "Eigengene score", "Lasso score (matched size)")))
+  "Hub score (247 genes)", "Eigengene score", "Lasso score (matched size)")))
 d$cohort_raw <- d$cohort
 COH_LEVELS <- c("TCGA", "ORIEN", "GSE41613", "GSE42743")
 COH_LABELS <- c("TCGA (transfer)", "ORIEN (source, in-sample)",
@@ -106,6 +106,6 @@ gg <- ggplot(d, aes(C, score_lab, colour = clears)) +
         plot.title = element_text(face = "bold", size = 12),
         plot.subtitle = element_text(size = 9, colour = "grey30"))
 
-ggsave(file.path(OUT_DIR, "fig4_3_forest.pdf"), gg, width = 6.5, height = 7.5)
-ggsave(file.path(OUT_DIR, "fig4_3_forest.png"), gg, width = 6.5, height = 7.5, dpi = 300)
+ggsave(file.path(OUT_DIR, "fig4_3_forest_k30.pdf"), gg, width = 6.5, height = 7.5)
+ggsave(file.path(OUT_DIR, "fig4_3_forest_k30.png"), gg, width = 6.5, height = 7.5, dpi = 300)
 cat("Written:", file.path(OUT_DIR, "fig4_3_forest.{pdf,png}"), "\n")
