@@ -15,7 +15,7 @@ suppressPackageStartupMessages({
   library(ggplot2); library(dplyr)
 })
 
-DS_FILE <- "results/module_decomposition/group_difference_summary.csv"
+DS_FILE <- "results/module_decomposition_k30/group_difference_summary.csv"
 OUT_DIR <- "results/figures"
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
@@ -62,6 +62,6 @@ gg <- ggplot(ds, aes(pct, programme, fill = cohort)) +
         plot.title = element_text(face = "bold", size = 12),
         plot.subtitle = element_text(size = 9, colour = "grey30"))
 
-ggsave(file.path(OUT_DIR, "fig4_6b_gap_shares.pdf"), gg, width = 7.5, height = 5)
-ggsave(file.path(OUT_DIR, "fig4_6b_gap_shares.png"), gg, width = 7.5, height = 5, dpi = 300)
+ggsave(file.path(OUT_DIR, "fig4_6b_gap_shares_k30.pdf"), gg, width = 7.5, height = 5)
+ggsave(file.path(OUT_DIR, "fig4_6b_gap_shares_k30.png"), gg, width = 7.5, height = 5, dpi = 300)
 cat("Written:", file.path(OUT_DIR, "fig4_6b_gap_shares.{pdf,png}"), "\n")
