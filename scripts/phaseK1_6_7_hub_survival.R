@@ -53,7 +53,7 @@ EXT_DIR  <- "data/external"
 HUB_DIR  <- "results/phaseK1_6_hub_overlap"
 CPSS_DIR <- "results/phase4_cpss_RULEFIX"   # rev b run of record (plan D2b)
 E8_DIR   <- "results/phase8_transportability"
-OUT_DIR  <- "results/phaseK1_6_7_hub_survival"
+OUT_DIR  <- "results/phaseK1_6_7_hub_survival_k30"
 
 SIZES     <- c(50, 100, 250)
 N_RANDOM  <- 1000

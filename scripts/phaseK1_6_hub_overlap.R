@@ -56,7 +56,7 @@ enableWGCNAThreads()
 PROC_DIR <- "data/processed"
 K1_DIR   <- "results/phaseK1_module_preservation"
 CPSS_DIR <- "results/phase4_cpss_RULEFIX"   # rev b run of record (plan D2b)
-OUT_DIR  <- "results/phaseK1_6_hub_overlap"
+OUT_DIR  <- "results/phaseK1_6_hub_overlap_k30"
 
 K_GRID   <- c(10, 20, 50)     # report the curve, not a chosen k
 SEED     <- 42

@@ -74,7 +74,7 @@ E8_DIR   <- "results/phase8_transportability"
 K1_DIR   <- "results/phaseK1_module_preservation"
 CPSS_DIR <- "results/phase4_cpss_RULEFIX"   # rev b run of record (plan D2b)
 GMT_DIR  <- "data/genesets"
-OUT_DIR  <- "results/phaseK1_6_8_enrichment"
+OUT_DIR  <- "results/phaseK1_6_8_enrichment_k30"
 
 MIN_TERM_SIZE <- 10     # smaller terms give unstable hypergeometric estimates
 MAX_TERM_SIZE <- 500    # very large terms are uninformative
