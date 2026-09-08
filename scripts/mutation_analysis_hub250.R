@@ -39,8 +39,8 @@
 # ==============================================================================
 
 DATA_DIR <- "data/processed"
-K3_DIR   <- "results/phaseK3_bootstrap_variance"
-OUT_DIR  <- "results/mutation_analysis_hub250"
+K3_DIR   <- "results/phaseK3_bootstrap_variance_k30"
+OUT_DIR  <- "results/mutation_analysis_hub250_k30"
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 PRIMARY_GENE <- "TP53"
