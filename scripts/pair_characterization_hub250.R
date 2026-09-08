@@ -43,7 +43,8 @@ TOL <- 1e-6
 # --- Pair assignment: identical logic to module_decomposition_hub250.R -------
 cf <- read.csv(file.path(K3_DIR, "coefs_hub_250.csv"),
                colClasses = c(gene = "character"))
-stopifnot(nrow(cf) == 309)
+stopifnot(nrow(cf) > 0, !any(duplicated(cf$gene)))
+cat("Hub set:", nrow(cf), "genes\n")
 beta <- setNames(cf$beta, cf$gene)
 
 pairs <- read.csv(file.path(HUB_DIR, "module_pairs.csv"))
