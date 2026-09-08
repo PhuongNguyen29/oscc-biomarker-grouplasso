@@ -62,7 +62,8 @@ TOL <- 1e-6
 # --- Load coefficients and module structure -----------------------------------
 cf <- read.csv(file.path(K3_DIR, "coefs_hub_250.csv"),
                colClasses = c(gene = "character"))
-stopifnot(nrow(cf) == 309, !any(duplicated(cf$gene)))
+stopifnot(nrow(cf) > 0, !any(duplicated(cf$gene)))
+cat("Hub set:", nrow(cf), "genes\n")
 beta <- setNames(cf$beta, cf$gene)
 
 pairs <- read.csv(file.path(HUB_DIR, "module_pairs.csv"))

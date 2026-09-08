@@ -22,12 +22,12 @@
 # Usage:  Rscript scripts/pair_characterization_hub250.R
 # ==============================================================================
 
-K3_DIR   <- "results/phaseK3_bootstrap_variance"
+K3_DIR   <- "results/phaseK3_bootstrap_variance_k30"
 K1_DIR   <- "results/phaseK1_module_preservation"
-HUB_DIR  <- "results/phaseK1_6_hub_overlap"
+HUB_DIR  <- "results/phaseK1_6_hub_overlap_k30"
 GMT_DIR  <- "data/genesets"          # h.all + c5.go.bp; exploratory/ excluded
 ANNOT    <- "data/raw/protein_coding_genes_annotation.csv"
-OUT_DIR  <- "results/module_decomposition"
+OUT_DIR  <- "results/module_decomposition_k30"
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # Match phaseK3 / module_decomposition_hub250.R EXACTLY (edit if yours differ)
