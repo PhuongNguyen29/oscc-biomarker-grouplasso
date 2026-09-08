@@ -42,8 +42,8 @@
 suppressPackageStartupMessages(library(survival))
 
 OOF_DIR <- "results.1/chapter3/step0b"          # legacy Step 0B outputs
-K3_DIR  <- "results/phaseK3_bootstrap_variance"
-OUT_DIR <- "results/late_fusion_hub"
+K3_DIR  <- "results/phaseK3_bootstrap_variance_k30"
+OUT_DIR <- "results/late_fusion_hub_k30"
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 DATASETS <- c("GSE41613", "GSE42743")
