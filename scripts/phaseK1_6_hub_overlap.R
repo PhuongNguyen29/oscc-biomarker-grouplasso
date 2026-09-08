@@ -58,7 +58,7 @@ K1_DIR   <- "results/phaseK1_module_preservation"
 CPSS_DIR <- "results/phase4_cpss_RULEFIX"   # rev b run of record (plan D2b)
 OUT_DIR  <- "results/phaseK1_6_hub_overlap_k30"
 
-K_GRID   <- c(10, 20, 50)     # report the curve, not a chosen k
+K_GRID   <- c(10, 20, 30, 50)     # report the curve, not a chosen k
 SEED     <- 42
 
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
