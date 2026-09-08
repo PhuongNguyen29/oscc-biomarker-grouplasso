@@ -39,9 +39,9 @@
 
 suppressPackageStartupMessages(library(ggplot2))
 
-K3_DIR  <- "results/phaseK3_bootstrap_variance"
-HUB_DIR <- "results/phaseK1_6_hub_overlap"
-OUT_DIR <- "results/module_decomposition"
+K3_DIR  <- "results/phaseK3_bootstrap_variance_k30"
+HUB_DIR <- "results/phaseK1_6_hub_overlap_k30"
+OUT_DIR <- "results/module_decomposition_k30"
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
 # EDIT to match phaseK3's expression file paths EXACTLY (score gate verifies).

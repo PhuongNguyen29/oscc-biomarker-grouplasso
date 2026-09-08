@@ -141,7 +141,7 @@ lasso_set <- function(n) {
            rownames(po)[order(-po[, 1])][seq_len(h)]))
 }
 
-hub   <- hub_set(40)
+hub   <- hub_set(30)
 lasso <- lasso_set(length(hub))
 cat("  hub set:  ", length(hub),  "genes\n")
 cat("  lasso set:", length(lasso), "genes\n")
