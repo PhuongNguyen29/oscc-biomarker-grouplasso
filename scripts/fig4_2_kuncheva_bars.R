@@ -43,7 +43,7 @@ las <- ov %>% filter(grepl("^lasso_n", level)) %>%
 
 df <- bind_rows(hub, las) %>% arrange(size)
 df$size <- factor(df$size, levels = sort(unique(df$size)))
-stopifnot(nrow(df) == 6)
+stopifnot(nrow(df) == 8)
 print(df)                              # verify before plotting    
 
 gg <- ggplot(df, aes(size, kuncheva, fill = selector)) +
