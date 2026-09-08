@@ -266,6 +266,8 @@ if (file.exists(f_t) && file.exists(f_o)) {
         jaccard = jaccard(gt, go), level = paste0("lasso_n", n))
     }
   }
+  write.csv(bind_rows(rows), file.path(OUT_DIR, "lasso_comparator_overlap.csv"),
+            row.names = FALSE)
   write.csv(bind_rows(rows), file.path(OUT_DIR, "hub_overlap.csv"),
             row.names = FALSE)
   cat("\n  Lasso selection probabilities are ranked highest-first; the top-N\n")

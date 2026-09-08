@@ -18,21 +18,25 @@
 # the inline block -- the stopifnot below is the tripwire either way.
 # ==============================================================================
 
-suppressPackageStartupMessages(library(ggplot2))
+suppressPackageStartupMessages({library(ggplot2); library(dplyr)})
+K164_DIR <- "results/phaseK1_6_hub_overlap_k30"
 OUT_DIR <- "results/figures"
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 
-df <- data.frame(
-  size     = factor(rep(c("50", "100", "250"), 2), levels = c("50", "100", "250")),
-  selector = rep(c("Module membership (kME hubs)",
-                   "Penalized regression (lasso top-N)"), each = 3),
-  kuncheva = c(0.232, 0.264, 0.510,     # hub union, k = 10/20/50 per pair
-               0.009, -0.001, -0.001))   # corrected-lasso top-N at the SAME
-                                          # union sizes (50 / 100 / 250)
+hub <- read.csv(file.path(K164_DIR, "hub_overlap.csv")) %>%
+  filter(tcga_module == "union") %>%              # check the actual column name
+  transmute(size = as.character(n_T), kuncheva,
+            selector = "Module membership (kME hubs)")
 
-# Tripwire: these must match the K1.6.4 rerun log exactly
-stopifnot(identical(df$kuncheva[1:3], c(0.232, 0.264, 0.510)),
-          identical(df$kuncheva[4:6], c(0.009, -0.001, -0.001)))
+las <- read.csv(file.path(K164_DIR, "lasso_comparator_overlap.csv")) %>%
+  filter(set_size %in% as.integer(hub$size)) %>%  # union sizes only, not per-module
+  transmute(size = as.character(set_size), kuncheva,
+            selector = "Penalized regression (lasso top-N)")
+
+df <- bind_rows(hub, las)
+df$size <- factor(df$size, levels = sort(unique(as.integer(df$size))))
+stopifnot(nrow(df) == 6)                          # 3 sizes x 2 selectors
+print(df)                                 
 
 gg <- ggplot(df, aes(size, kuncheva, fill = selector)) +
   geom_col(position = position_dodge(width = 0.7), width = 0.62) +
@@ -57,6 +61,6 @@ gg <- ggplot(df, aes(size, kuncheva, fill = selector)) +
         plot.title = element_text(face = "bold", size = 12),
         plot.subtitle = element_text(size = 9, colour = "grey30"))
 
-ggsave(file.path(OUT_DIR, "fig4_2_kuncheva_bars.pdf"), gg, width = 6.5, height = 4.6)
-ggsave(file.path(OUT_DIR, "fig4_2_kuncheva_bars.png"), gg, width = 6.5, height = 4.6, dpi = 300)
+ggsave(file.path(OUT_DIR, "fig4_2_kuncheva_bars_k30.pdf"), gg, width = 6.5, height = 4.6)
+ggsave(file.path(OUT_DIR, "fig4_2_kuncheva_bars_k30.png"), gg, width = 6.5, height = 4.6, dpi = 300)
 cat("Written:", file.path(OUT_DIR, "fig4_2_kuncheva_bars.{pdf,png}"), "\n")
