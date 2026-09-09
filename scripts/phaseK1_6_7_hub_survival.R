@@ -188,12 +188,12 @@ cat("\n--- Random-set null (Venet et al. 2011):", N_RANDOM, "draws per size ---\
 cat("Percentile = fraction of random sets the observed value EXCEEDS.\n\n")
 
 null_rows <- list()
-for (n in SIZES) {
+for (k in K_VALUES) {
   for (target in c("hub", "lasso")) {
-    key <- paste0(target, "_", n)
+    key <- paste0(target, "_k", k)
     if (!key %in% names(sets)) next
     sz <- length(sets[[key]])
-    set.seed(SEED + n)
+    set.seed(SEED + k) 
     draws <- replicate(N_RANDOM, {
       a <- agreement(sample(universe, sz))
       if (is.null(a)) rep(NA, 7) else a
