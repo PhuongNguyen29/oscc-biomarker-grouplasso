@@ -50,7 +50,7 @@ options(stringsAsFactors = FALSE)
 
 PROC_DIR <- "data/processed"
 EXT_DIR  <- "data/external"
-HUB_DIR  <- "results/phaseK1_6_hub_overlap"
+HUB_DIR  <- "results/phaseK1_6_hub_overlap_k30"
 CPSS_DIR <- "results/phase4_cpss_RULEFIX"   # rev b run of record (plan D2b)
 E8_DIR   <- "results/phase8_transportability"
 OUT_DIR  <- "results/phaseK1_6_7_hub_survival_k30"
@@ -58,7 +58,7 @@ OUT_DIR  <- "results/phaseK1_6_7_hub_survival_k30"
 SIZES     <- c(50, 100, 250)
 N_RANDOM  <- 1000
 SEED      <- 42
-AGE_FLOOR <- "0.551-0.565"
+AGE_FLOOR <- "per cohort: TCGA 0.565, ORIEN 0.551, GSE41613 0.518, GSE42743 0.571"
 
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 dir.create("logs", showWarnings = FALSE)
@@ -271,7 +271,8 @@ for (nm in names(sets)) {
   if (length(g) < 10) next
   set.seed(SEED)
   cv <- cv.glmnet(X$ORIEN[, g, drop = FALSE], Y$ORIEN, family = "cox",
-                  alpha = 0, nfolds = 10, standardize = FALSE)
+                  alpha = 0, nfolds = 10, standardize = FALSE,
+                  cox.ties = "breslow")
   b <- as.numeric(coef(cv, s = "lambda.min"))
   for (co in names(X)) {
     gg <- intersect(g, colnames(X[[co]]))

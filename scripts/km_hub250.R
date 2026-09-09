@@ -91,7 +91,7 @@ for (co in names(SURV_FILES)) {
   lr  <- survdiff(Surv(time_months, event) ~ risk_group, data = d)
   p   <- pchisq(lr$chisq, df = 1, lower.tail = FALSE)
 
-  ttl <- sprintf("%s \u2014 309-gene hub score%s", co,
+  ttl <- sprintf("%s \u2014 247-gene hub score%s", co,
                  if (IN_SAMPLE[co]) "  (source cohort, in-sample)" else "")
 
   plots[[co]] <- ggsurvplot(

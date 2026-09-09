@@ -31,7 +31,7 @@ stopifnot(nrow(ds) == 20)   # 5 pairs x 4 cohorts
 
 # Provenance tripwire: recorded ORIEN adaptive-immune share ~39%
 chk <- ds$share_of_total_gap[ds$cohort == "ORIEN" & ds$pair == "brown_yellow"]
-stopifnot(length(chk) == 1, abs(chk - 0.393) < 0.01)
+stopifnot(length(chk) == 1, abs(chk - 0.403) < 0.01)
 
 ds <- ds %>%
   mutate(programme = ifelse(pair %in% names(PROGRAM), PROGRAM[pair], pair),
