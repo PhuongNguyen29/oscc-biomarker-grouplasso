@@ -55,10 +55,11 @@ CPSS_DIR <- "results/phase4_cpss_RULEFIX"   # rev b run of record (plan D2b)
 E8_DIR   <- "results/phase8_transportability"
 OUT_DIR  <- "results/phaseK1_6_7_hub_survival_k30"
 
-SIZES     <- c(50, 100, 250)
+K_VALUES <- c(8, 16, 30, 40)  
 N_RANDOM  <- 1000
 SEED      <- 42
 AGE_FLOOR <- "per cohort: TCGA 0.565, ORIEN 0.551, GSE41613 0.518, GSE42743 0.571"
+
 
 dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
 dir.create("logs", showWarnings = FALSE)
@@ -142,18 +143,15 @@ lasso_set <- function(n) {
            rownames(po)[order(-po[, 1])][seq_len(half)]))
 }
 
-for (n in SIZES) {
-  # hub_set(k) returns a union over 5 pairs x 2 cohorts, so k is chosen to land
-  # near the target size rather than assumed equal to it
-  k <- max(5, round(n / (nrow(pairs) * 2) * 1.6))
+for (k in K_VALUES) {
   h <- hub_set(k)
-  l <- lasso_set(length(h))          # lasso matched to the ACTUAL hub set size
-  sets[[paste0("hub_", n)]]   <- h
-  if (!is.null(l)) sets[[paste0("lasso_", n)]] <- l
-  cat(sprintf("  target %3d -> hub k=%2d gives %3d genes | lasso %3d genes\n",
-              n, k, length(h), if (is.null(l)) 0 else length(l)))
+  l <- lasso_set(length(h))
+  nm <- paste0("k", k)
+  sets[[paste0("hub_",   nm)]] <- h
+  if (!is.null(l)) sets[[paste0("lasso_", nm)]] <- l
+  cat(sprintf("  k=%2d -> hub %3d genes | lasso %3d genes\n",
+              k, length(h), if (is.null(l)) 0 else length(l)))
 }
-cat("\n")
 
 # ==============================================================================
 # K1.6.7.2 Cross-cohort agreement of marginal effects
