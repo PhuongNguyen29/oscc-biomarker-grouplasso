@@ -190,7 +190,8 @@ for (nm in c("hub_250", "lasso_250")) {
   g <- Reduce(intersect, c(list(g), lapply(X, colnames)))
   set.seed(SEED)
   cv <- cv.glmnet(X$ORIEN[, g, drop = FALSE], Y$ORIEN, family = "cox",
-                  alpha = 0, nfolds = 10, standardize = FALSE)
+                  alpha = 0, nfolds = 10, standardize = FALSE,
+                  cox.ties = "breslow")
   b <- as.numeric(coef(cv, s = "lambda.min"))
   write.csv(data.frame(gene = g, beta = b),
             file.path(OUT_DIR, sprintf("coefs_%s.csv", nm)),

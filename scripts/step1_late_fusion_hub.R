@@ -54,7 +54,7 @@ available_seeds <- function(dataset) {
   nm <- names(read.csv(f, nrows = 1))
   sort(as.integer(sub("^risk_score_seed", "", grep("^risk_score_seed\\d+$", nm, value = TRUE))))
 }
-TIES <- "efron"    # set to "breslow" to reproduce the legacy lifelines fits
+TIES <- "breslow"    # set to "breslow" to reproduce the legacy lifelines fits
 
 load_clinical_oof <- function(dataset, seed) {
   f <- file.path(OOF_DIR, sprintf("%s_clinical_oof_scores.csv", dataset))

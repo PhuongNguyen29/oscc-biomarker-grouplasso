@@ -190,7 +190,8 @@ fit_lasso <- function(x, y, offset = NULL, nfolds = INNER_FOLDS, seed = SEED) {
   set.seed(seed)
   cv <- cv.glmnet(x, y, family = "cox", alpha = ALPHA_LASSO,
                   nfolds = nfolds, offset = offset, standardize = FALSE,
-                  nlambda = N_LAMBDA, parallel = TRUE)
+                  nlambda = N_LAMBDA, parallel = TRUE,
+                  cox.ties = "breslow")
   list(beta = as.numeric(coef(cv, s = "lambda.min")), lambda = cv$lambda.min)
 }
 

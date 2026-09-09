@@ -48,7 +48,8 @@ cidx <- function(risk, y) as.numeric(concordance(y ~ risk, reverse = TRUE)$conco
 fit_hub <- function(g, seed = SEED) {
   set.seed(seed)
   cv <- cv.glmnet(X$ORIEN[, g, drop = FALSE], Y$ORIEN, family = "cox",
-                  alpha = 0, nfolds = 10, standardize = FALSE)
+                  alpha = 0, nfolds = 10, standardize = FALSE,
+                  cox.ties = "breslow")
   as.numeric(coef(cv, s = "lambda.min"))
 }
 
@@ -73,7 +74,8 @@ for (k in K_GRID) {
       tr <- fold != f; te <- !tr
       set.seed(SEED)
       cvf <- cv.glmnet(X$ORIEN[tr, g, drop = FALSE], Y$ORIEN[tr], family = "cox",
-                       alpha = 0, nfolds = 10, standardize = FALSE)
+                       alpha = 0, nfolds = 10, standardize = FALSE,
+                       cox.ties = "breslow")
       bf <- as.numeric(coef(cvf, s = "lambda.min"))
       oof[te] <- as.numeric(X$ORIEN[te, g, drop = FALSE] %*% bf)
     }

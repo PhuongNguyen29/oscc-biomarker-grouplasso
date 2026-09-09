@@ -251,7 +251,7 @@ fit_en <- function(x, y, alpha, offset = NULL, nfolds = INNER_FOLDS, seed = SEED
   set.seed(seed)
   cv <- cv.glmnet(x, y, family = "cox", alpha = alpha,
                   nfolds = nfolds, offset = offset, standardize = FALSE,
-                  nlambda = N_LAMBDA, parallel = TRUE)
+                  nlambda = N_LAMBDA, parallel = TRUE, cox.ties = "breslow")
   b <- as.numeric(coef(cv, s = "lambda.min")); rule <- "lambda.min"
   if (all(b == 0)) {
     ok <- which(cv$glmnet.fit$df >= 1)

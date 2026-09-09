@@ -169,7 +169,7 @@ for (co in names(EXPR_FILES)) {
     geom_tile() +
     scale_fill_gradient2(low = "#2E86DE", mid = "white", high = "#E74C3C",
                          limits = c(-lim, lim), name = "Contribution\n(beta x expr)") +
-    labs(title = sprintf("%s \u2014 module-level decomposition of the hub score", co),
+    labs(title = sprintf("%s: module-level decomposition of the hub score", co),
          subtitle = "Patients ordered by total score (left = lowest risk); exact linear decomposition",
          x = "Patients (score-ordered)", y = NULL) +
     theme_classic(base_size = 11) +
