@@ -28,13 +28,14 @@ module load r/4.2.2_gcc-9.5.0         # R 4.2.2 (server runs 4.4.1: see equivale
 
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 ECMS_WGCNA_THREADS=2
 SC=$1; TYPE=$2; T=$SGE_TASK_ID
+ROOT=${ECMS_OUT_ROOT:-results/ecms_sim}    # same output root as ecms_sim_call.R
 
 if [ "$TYPE" = "ownnull" ]; then
   REP=$(( (T - 1) / 30 + 1 )); J=$(( (T - 1) % 30 + 1 ))
-  OUTF=$(printf "results/ecms_sim/%s/ownnull_%04d_%03d.csv" "$SC" "$REP" "$J")
+  OUTF=$(printf "%s/%s/ownnull_%04d_%03d.csv" "$ROOT" "$SC" "$REP" "$J")
   ARGS="$SC ownnull $REP $J"
 else
-  OUTF=$(printf "results/ecms_sim/%s/%s_%04d.csv" "$SC" "$TYPE" "$T")
+  OUTF=$(printf "%s/%s/%s_%04d.csv" "$ROOT" "$SC" "$TYPE" "$T")
   ARGS="$SC $TYPE $T"
 fi
 
