@@ -36,7 +36,12 @@ pc_bonf <- function(p, r) { p <- sort(p); min(1, (length(p) - r + 1) * p[r]) }
 read_all <- function(dir, pattern) {
   f <- list.files(dir, pattern = pattern, full.names = TRUE)
   if (!length(f)) return(NULL)
-  do.call(rbind, lapply(f, read.csv, colClasses = c(module = "character")))
+  d <- lapply(f, function(x) {
+    y <- read.csv(x, colClasses = c(module = "character"))
+    if (!"j" %in% names(y)) y$j <- NA_integer_      # files written before the ownnull update
+    y[, c("scenario", "type", "index", "j", setdiff(names(y), c("scenario", "type", "index", "j")))]
+  })
+  do.call(rbind, d)
 }
 
 score_scenario <- function(SC) {
