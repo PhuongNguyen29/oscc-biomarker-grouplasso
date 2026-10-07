@@ -24,7 +24,12 @@
 #
 # rev 3 (7 Oct 2026): lambda and gamma calibrated from the real K1 modules
 # (base lambda 0.98, gamma 0.154); scenario levels in ecms_levels;
-# ecms_check_base_target(). Module sizes remain OPEN (refuses to run).
+# ecms_check_base_target().
+#
+# rev 4 (7 Oct 2026): base sizes = the 9 real TCGA modules, p = 4,702,
+# pattern counts 2/2/2/3. Base now runs. Fallback if modulePreservation is too
+# slow at p = 4,702: p = 2,000, K = 10, sizes 30 to 300 (not proportional
+# shrinking, which would drop modules below minModuleSize 30).
 #
 # Model, gene g in module k, sample i, cohort c:
 #   x_gi = m_kc * lambda_c * w_g * f_ki + gamma_c * h_i + e_gi,  e ~ N(0, sigma_c^2)
@@ -50,15 +55,18 @@
 # Base scenario skeleton. NA entries are OPEN DECISIONS (Stage 0) and must be
 # fixed in writing before any base run; the generator refuses to run with NA.
 ecms_base_params <- function() list(
-  p          = 2000,
+  p          = 4702,           # FIXED 7 Oct: the real analysis universe
   C          = 3,
-  sizes      = NA,             # OPEN: 15 sizes in 30 to 500 do not fit in 2,000 genes
+  # FIXED 7 Oct: the 9 real TCGA module sizes (K1 preservation_statistics.csv:
+  # black, blue, brown, green, magenta, pink, red, turquoise, yellow).
+  # Sum 1,856; 2,846 genes unassigned (60.5%), as in TCGA.
+  sizes      = c(59, 344, 322, 218, 54, 57, 135, 400, 267),
   n          = rep(300, 4),    # disc, t1, t2, t3
   lambda     = rep(0.98, 4),   # FIXED 7 Oct: pooled median of 16 real modules
   gamma      = rep(0.154, 4),  # FIXED 7 Oct: TCGA background r 0.023, gamma = sqrt(r/(1-r))
   sigma      = rep(1, 4),
   w_range    = c(0.5, 1),
-  n_by_npres = c(3, 3, 3, 6),  # modules preserved in 0, 1, 2, 3 test cohorts (20/20/20/40%)
+  n_by_npres = c(2, 2, 2, 3),  # FIXED 7 Oct: preserved in 0, 1, 2, 3 test cohorts (22/22/22/33%)
   p_weaken   = 0,              # OPEN: is the weakened level used in base?
   rho_M      = 0,
   dep_modules = integer(0),
