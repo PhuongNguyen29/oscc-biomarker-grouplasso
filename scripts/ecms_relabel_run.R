@@ -77,26 +77,14 @@ rm(expr_list); invisible(gc())
 stamp("genes: ", length(common))
 
 # --- Real K1 module labels for the reference --------------------------------------
-# Supports two layouts of module_assignments.csv:
-#   wide: a gene column plus one column per reference cohort (e.g. TCGA, ORIEN)
-#   long: columns gene, <cohort/reference>, module
-# Anything else stops with the column names, so the mapping is never guessed.
+# module_assignments.csv layout (confirmed 7 Oct): gene_id, module_TCGA, module_ORIEN
 ma <- read.csv(file.path(K1_DIR, "module_assignments.csv"), check.names = FALSE)
-nm <- names(ma); lnm <- tolower(nm)
-gene_col <- nm[lnm %in% c("gene", "genes", "symbol", "gene_symbol")][1]
-if (is.na(gene_col)) stop("module_assignments.csv: no gene column found. Columns: ",
-                          paste(nm, collapse = ", "))
-if (REF %in% nm) {                                        # wide
-  lab_raw <- setNames(as.character(ma[[REF]]), ma[[gene_col]])
-} else {
-  ref_col <- nm[lnm %in% c("reference", "cohort", "dataset", "network")][1]
-  mod_col <- nm[lnm %in% c("module", "color", "colour", "module_color")][1]
-  if (is.na(ref_col) || is.na(mod_col))
-    stop("module_assignments.csv layout not recognised. Columns: ",
-         paste(nm, collapse = ", "), "\nPaste head() of this file so the loader can be fixed.")
-  d <- ma[ma[[ref_col]] == REF, ]
-  lab_raw <- setNames(as.character(d[[mod_col]]), d[[gene_col]])
-}
+mod_col <- paste0("module_", REF)
+if (!all(c("gene_id", mod_col) %in% names(ma)))
+  stop("module_assignments.csv: expected columns gene_id and ", mod_col,
+       ". Found: ", paste(names(ma), collapse = ", "))
+if (anyDuplicated(ma$gene_id)) stop("duplicate gene_id in module_assignments.csv")
+lab_raw <- setNames(as.character(ma[[mod_col]]), ma$gene_id)
 labels <- unname(lab_raw[common])
 if (anyNA(labels)) stop(sum(is.na(labels)), " of ", length(common),
                         " analysis genes have no ", REF, " module label")
