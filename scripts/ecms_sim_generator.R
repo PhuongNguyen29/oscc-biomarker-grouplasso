@@ -26,6 +26,9 @@
 # (base lambda 0.98, gamma 0.154); scenario levels in ecms_levels;
 # ecms_check_base_target().
 #
+# rev 5 (7 Oct 2026): reorganized absence for design S11 (reorg_phi, reorg_m;
+# sim$reorg logs how many genes moved). reorg_phi = 0 reproduces rev 4 exactly.
+#
 # rev 4 (7 Oct 2026): base sizes = the 9 real TCGA modules, p = 4,702,
 # pattern counts 2/2/2/3. Base now runs. Fallback if modulePreservation is too
 # slow at p = 4,702: p = 2,000, K = 10, sizes 30 to 300 (not proportional
@@ -71,7 +74,14 @@ ecms_base_params <- function() list(
   rho_M      = 0,
   dep_modules = integer(0),
   zscore     = TRUE,           # per gene within cohort, as in the real pipeline
-  clip       = NA)             # real pipeline clips at 3; NA = no clipping
+  clip       = NA,             # real pipeline clips at 3; NA = no clipping
+  # rev 5 (7 Oct): reorganized absence (design S11). 0 = pure absence (base).
+  # In a test cohort where module k is absent, each of its genes independently,
+  # with probability reorg_phi, loads (lambda_c * w_g) on one of reorg_m NEW
+  # cohort-specific factors; the module as a whole shares no common factor, so
+  # it stays NOT preserved under the section 2 truth definition.
+  reorg_phi  = 0,              # calibrated in ecms_reorg_calibration.R
+  reorg_m    = 2)              # FIXED a priori: the module splits into two pieces
 
 # Calibrated scenario levels (fixed 7 Oct 2026, from the real K1 modules;
 # sigma = 1, w ~ U(0.5, 1)). Population mean within-module r in brackets,
@@ -105,7 +115,8 @@ ecms_demo_params <- function() {
 
 ecms_validate_params <- function(par) {
   need <- c("p", "C", "sizes", "n", "lambda", "gamma", "sigma", "w_range",
-            "n_by_npres", "p_weaken", "rho_M", "dep_modules", "zscore", "clip")
+            "n_by_npres", "p_weaken", "rho_M", "dep_modules", "zscore", "clip",
+            "reorg_phi", "reorg_m")
   miss <- setdiff(need, names(par))
   if (length(miss)) stop("missing parameters: ", paste(miss, collapse = ", "))
   if (anyNA(c(par$sizes, par$lambda, par$gamma, par$sigma, par$n)))
@@ -117,7 +128,8 @@ ecms_validate_params <- function(par) {
             sum(par$sizes) < par$p, all(par$sizes >= 2),
             par$p_weaken >= 0, par$p_weaken <= 1,
             par$rho_M >= 0, par$rho_M < 1,
-            all(par$dep_modules %in% seq_len(K)))
+            all(par$dep_modules %in% seq_len(K)),
+            par$reorg_phi >= 0, par$reorg_phi <= 1, par$reorg_m >= 1)
   invisible(TRUE)
 }
 
@@ -169,6 +181,7 @@ ecms_generate <- function(par, seed, verbose = TRUE) {
 
   gene_ids  <- sprintf("g%04d", seq_len(p))
   multiExpr <- setNames(vector("list", C + 1), coh)
+  reorg_log <- list()
   for (j in seq_along(coh)) {
     n    <- par$n[j]
     mult <- if (j == 1) rep(1, K) else M[, j - 1]
@@ -178,6 +191,24 @@ ecms_generate <- function(par, seed, verbose = TRUE) {
     L  <- matrix(0, K, p)
     L[cbind(labels[in_mod], in_mod)] <- mult[labels[in_mod]] * par$lambda[j] * w[in_mod]
     X  <- X + Fk %*% L
+    # rev 5: reorganized absence. Skipped entirely when reorg_phi = 0, so the
+    # random-number stream (and every earlier result) is unchanged in that case.
+    if (j > 1 && par$reorg_phi > 0) {
+      for (k in which(mult == 0)) {
+        idx <- which(labels == k)
+        hit <- idx[runif(length(idx)) < par$reorg_phi]
+        if (length(hit)) {
+          grp <- sample.int(par$reorg_m, length(hit), replace = TRUE)
+          G   <- matrix(rnorm(n * par$reorg_m), n, par$reorg_m)
+          for (m in seq_len(par$reorg_m)) {
+            g <- hit[grp == m]
+            if (length(g)) X[, g] <- X[, g] + outer(G[, m], par$lambda[j] * w[g])
+          }
+        }
+        reorg_log[[length(reorg_log) + 1]] <- data.frame(
+          cohort = coh[j], module = k, size = length(idx), n_reorganized = length(hit))
+      }
+    }
     if (par$zscore) {
       X <- scale(X); attr(X, "scaled:center") <- NULL; attr(X, "scaled:scale") <- NULL
     }
@@ -197,8 +228,13 @@ ecms_generate <- function(par, seed, verbose = TRUE) {
   truth$disc_ve <- vapply(seq_len(K), function(k)
     eigengene_ve(Xd[, labels == k, drop = FALSE]), numeric(1))
 
+  reorg <- if (length(reorg_log)) do.call(rbind, reorg_log) else
+    data.frame(cohort = character(0), module = integer(0), size = integer(0),
+               n_reorganized = integer(0))
+
   list(multiExpr = multiExpr, multiColor = list(disc = labels), truth = truth,
-       w = w, M = M, seed = seed, params = par, relabelled = character(0))
+       w = w, M = M, seed = seed, params = par, relabelled = character(0),
+       reorg = reorg)
 }
 
 # ---- Relabel check analogue (design 7b) -----------------------------------------
@@ -320,9 +356,12 @@ ecms_check_sim <- function(sim, n_random = 200) {
       idx <- which(lab == k)
       out[[length(out) + 1]] <- data.frame(
         cohort = coh, set = paste0("module_", k),
-        type = if (mult[k] > 0) "module_present" else "module_absent",
+        type = if (mult[k] > 0) "module_present" else
+               if (j > 1 && par$reorg_phi > 0) "module_reorganized" else "module_absent",
         observed = mean_offdiag_r(X[, idx]),
-        expected = ecms_expected_r(sim$w[idx], mult[k] * par$lambda[j],
+        # no closed form for reorganized modules: expected left NA (descriptive)
+        expected = if (mult[k] == 0 && j > 1 && par$reorg_phi > 0) NA_real_ else
+                   ecms_expected_r(sim$w[idx], mult[k] * par$lambda[j],
                                    par$gamma[j], par$sigma[j]))
     }
     bg <- which(lab == 0)
@@ -350,7 +389,7 @@ ecms_check_many <- function(par, seeds = 1:20) {
     ch <- ecms_check_sim(ecms_generate(par, s, verbose = FALSE)); ch$seed <- s; ch
   }))
   all$diff <- all$observed - all$expected
-  tested <- all[all$type != "random_set", ]
+  tested <- all[!is.na(all$expected), ]
   summ <- aggregate(cbind(observed, expected, diff) ~ cohort + type, data = tested, FUN = mean)
   summ$pass <- abs(summ$diff) <= 0.01
   rnd <- aggregate(observed ~ cohort, data = all[all$type == "random_set", ], FUN = mean)
